@@ -1,0 +1,22 @@
+{
+  "name": "@ligma/frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@colyseus/sdk": "^0.18.1",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@ligma/backend": "*",
+    "@types/three": "^0.186.0",
+    "typescript": "^5.0.4",
+    "vite": "^8.2.1"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "ligma",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "start": "npm start -w apps/backend",
+    "build": "npm run build --workspaces --if-present",
+    "serve": "npm run build && NODE_ENV=production node apps/backend/build/index.js",
+    "prod": "npm run build && (lsof -ti tcp:2570 | xargs kill 2>/dev/null || true) && sleep 1 && (NODE_ENV=production PORT=2570 nohup node apps/backend/build/index.js > /tmp/ligma-2570.log 2>&1 &) && sleep 1 && node scripts/prod-urls.mjs",
+    "prod:fly": "npm run typecheck && fly deploy",
+    "prod:fly:local": "npm run typecheck && fly deploy --local-only",
+    "test": "npm test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">= 22.0.0"
+  },
+  "version": "0.1.0",
+  "description": "A Colyseus multiplayer server"
+}

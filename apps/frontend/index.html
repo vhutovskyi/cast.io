@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Ligma</title>
+    <style>
+      /* Brand, for the menu and the in-game screens alike: purple and blue lead, orange warms,
+         green and yellow are rare signals. Shades of each below. */
+      :root {
+        --purple: #8b3cf5; --purple-hi: #a66bff; --purple-deep: #2a1366;
+        --blue: #1235f0; --blue-hi: #4560ff;
+        --orange: #f19a3a; --green: #6ef24a; --yellow: #fffb8a; --red: #ff5d73;
+        --ink: #f1efff; --ink-dim: #b4acd6; --line: #9d7cff2e; --line-hi: #9d7cff73;
+        --surface: #120a30d1; --surface-hi: #1e1250eb; --well: #0b0624;
+        --ease-out: cubic-bezier(.25, 1, .5, 1);
+      }
+      /* The two button looks every screen shares: the main action, and the rest. */
+      .btn-primary {
+        padding: .8rem 2.4rem; border: 1px solid #c3a2ff59; border-radius: .9rem; color: #fff; font-size: 1.1rem; font-weight: 800; letter-spacing: .02em;
+        background: linear-gradient(135deg, var(--purple), var(--blue)); box-shadow: 0 14px 36px -12px #6a3cf5e6, inset 0 1px 0 #ffffff33;
+        transition: transform .16s var(--ease-out), border-color .16s;
+      }
+      .btn-primary:hover:not(:disabled) { background: linear-gradient(135deg, var(--purple-hi), var(--blue-hi)); border-color: var(--orange); transform: translateY(-2px); }
+      .btn-primary:active:not(:disabled) { transform: scale(.98); }
+      .btn-secondary {
+        display: inline-flex; align-items: center; gap: .5rem; padding: .6rem 1.1rem; border: 1px solid var(--line-hi); border-radius: .75rem;
+        background: var(--surface); color: var(--ink); font-weight: 650; transition: background-color .16s, border-color .16s;
+      }
+      .btn-secondary:hover:not(:disabled) { background: var(--surface-hi); border-color: var(--blue-hi); }
+      .btn-primary:focus-visible, .btn-secondary:focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
+      .btn-primary:disabled { background: var(--surface); border-color: var(--line); color: var(--ink-dim); box-shadow: none; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1116; color: #e6e9ef; font: 14px/1.5 system-ui, sans-serif; }
+      [hidden] { display: none !important; }
+      button, input { font: inherit; color: inherit; }
+      button { padding: .45rem .9rem; border: 0; border-radius: .4rem; background: #3b6fd8; cursor: pointer; }
+      button:hover:not(:disabled) { background: #4a7ee6; }
+      button:disabled { background: #2b303b; color: #7d8494; cursor: default; }
+
+      #game { position: fixed; inset: 0; cursor: pointer; }
+
+      #hud { position: fixed; top: 1rem; left: 1rem; pointer-events: none; text-shadow: 0 1px 2px #000; }
+      #status { font-weight: 600; }
+      #crosshair { position: fixed; top: 50%; left: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: #fff; box-shadow: 0 0 2px #000; pointer-events: none; }
+      #overlay {
+        position: fixed; z-index: 2; inset: 0; display: grid; place-content: center; justify-items: center; gap: 1rem; pointer-events: none;
+        color: var(--ink); background: radial-gradient(ellipse at center, #0a052066, #0a0520d9 75%);
+      }
+      #overlay h2 { margin: 0; font-size: 2.25rem; font-weight: 800; letter-spacing: -.02em; text-shadow: 0 2px 20px #000a; }
+      .play-mouse { color: var(--ink-dim); }
+      .play-mouse .button-left { fill: var(--orange); animation: play-click 1.6s var(--ease-out) infinite; }
+      @keyframes play-click { 0%, 55%, 100% { opacity: .35; } 20% { opacity: 1; } }
+      /* In the corner, well away from the crosshair: a click to resume must never leave the room. */
+      #overlay #leave { position: fixed; right: 1.25rem; bottom: 1.25rem; pointer-events: auto; }
+      #leave:hover:not(:disabled) { border-color: var(--red); }
+
+      /* Lobby: the night arena moves behind, the chosen mage is framed into #stage, the menu sits around it. */
+      #lobby {
+        position: fixed; inset: 0; overflow-y: auto; color: var(--ink);
+      }
+      /* Scrims keep the side columns and the play row legible over the moving sky; the middle stays clear for the mage. */
+      #lobby::before {
+        content: ""; position: fixed; inset: 0; pointer-events: none;
+        background:
+          linear-gradient(90deg, #0a0520db, #0a052000 30%, #0a052000 70%, #0a0520db),
+          linear-gradient(0deg, #0a0520cc, #0a052000 28%);
+      }
+      #lobby.busy .menu { pointer-events: none; }
+      #lobby.busy .menu > * { opacity: .55; transition: opacity .2s; }
+      .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+      .menu {
+        position: relative; box-sizing: border-box; height: 100%; padding: 1.5rem 2rem 1.75rem;
+        display: grid; gap: 1rem 2.5rem;
+        /* Equal side tracks: the middle one, and everything in it, sits on the screen's centre line like the play row. */
+        grid-template-columns: clamp(18rem, 30vw, 32rem) minmax(0, 1fr) clamp(18rem, 30vw, 32rem);
+        grid-template-rows: auto minmax(12rem, 1fr) auto auto;
+        grid-template-areas: "side hero rooms" "side stage rooms" "side kit rooms" "play play play";
+      }
+      .menu h2 { margin: 0 0 .9rem; font-size: 1.05rem; font-weight: 650; }
+
+      .icon-button {
+        display: grid; place-items: center; width: 2.75rem; height: 2.75rem; padding: 0;
+        border: 1px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--ink-dim);
+        transition: color .16s, border-color .16s, background-color .16s;
+      }
+      .icon-button:hover:not(:disabled) { background: var(--surface-hi); border-color: var(--line-hi); color: var(--ink); }
+      .icon-button:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+      .icon-button svg { transition: transform .5s var(--ease-out); }
+      #open-settings:hover svg { transform: rotate(60deg); }
+
+      /* The element tiles fill the whole left column, top to the play row. */
+      .menu-side { grid-area: side; display: flex; flex-direction: column; gap: 2rem; min-width: 0; min-height: 0; }
+      .menu-side > section { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+      #element-picker { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+      .element-tile {
+        --el: #888; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .6rem;
+        min-height: 0; padding: 1rem .5rem; border: 1px solid var(--line); border-radius: 1rem;
+        background: radial-gradient(ellipse 80% 55% at 50% 42%, color-mix(in srgb, var(--el) 12%, transparent), transparent), var(--surface); font-size: 1.05rem; font-weight: 650; cursor: pointer;
+        transition: border-color .18s, background-color .18s, box-shadow .18s, transform .18s var(--ease-out);
+      }
+      .element-tile input { position: absolute; opacity: 0; pointer-events: none; }
+      .element-tile:hover { border-color: color-mix(in srgb, var(--el) 60%, transparent); transform: translateY(-2px); }
+      .element-tile:has(input:checked) {
+        border-color: var(--el);
+        background: radial-gradient(ellipse 80% 55% at 50% 42%, color-mix(in srgb, var(--el) 30%, transparent), transparent), color-mix(in srgb, var(--el) 10%, #120a30);
+        box-shadow: inset 0 0 0 1px var(--el), 0 0 32px -10px var(--el);
+      }
+      .element-tile:has(input:focus-visible) { outline: 2px solid var(--orange); outline-offset: 3px; }
+      .element-tile:has(input:disabled) { cursor: not-allowed; opacity: .45; transform: none; border-color: var(--line); }
+      .element-tile:has(input:disabled) .element-art { filter: grayscale(1); }
+      .element-tile:has(input:disabled) .element-art * { animation-play-state: paused; }
+      .element-tile .soon { position: absolute; top: .5rem; right: .65rem; font-size: 11px; font-weight: 500; color: var(--ink-dim); }
+
+      /* Element art: each tile's emblem moves the way its element does. Built in ui/elementArt.ts. */
+      .element-art { flex: none; width: min(70%, 10rem); aspect-ratio: 1; overflow: visible; filter: drop-shadow(0 0 12px color-mix(in srgb, var(--el) 40%, transparent)); transition: filter .25s, transform .25s var(--ease-out); }
+      .element-tile:has(input:checked) .element-art { filter: drop-shadow(0 0 18px color-mix(in srgb, var(--el) 75%, transparent)); transform: scale(1.06); }
+      /* Only the moving parts: fill-box would also shift the static parts' own transform attributes. */
+      .art-flame, .art-ember, .art-bob, .art-wave, .art-ripple, .art-mote, .art-rock { transform-box: fill-box; }
+      .art-flame { transform-origin: 50% 100%; animation: art-flicker 1.5s ease-in-out infinite alternate; }
+      .art-flame.mid { animation-duration: 1.05s; animation-delay: -.4s; }
+      .art-flame.core { animation-duration: .75s; animation-delay: -.2s; }
+      @keyframes art-flicker {
+        0% { transform: scale(1, 1) skewX(0); }
+        35% { transform: scale(.96, 1.07) skewX(-3deg); }
+        70% { transform: scale(1.03, .95) skewX(2deg); }
+        100% { transform: scale(.98, 1.04) skewX(-1deg); }
+      }
+      .art-ember { opacity: 0; animation: art-rise 2.4s ease-out infinite; }
+      @keyframes art-rise { 20% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), -8px); } }
+      .art-bob { animation: art-bob 2.8s ease-in-out infinite alternate; }
+      @keyframes art-bob { to { transform: translateY(-.9px); } }
+      .art-wave { animation: art-wave 2.2s linear infinite; }
+      .art-wave.back { animation-duration: 3.4s; animation-direction: reverse; }
+      @keyframes art-wave { to { transform: translateX(-6px); } }
+      .art-ripple { opacity: 0; transform-origin: center; animation: art-ripple 2.6s ease-out infinite; }
+      @keyframes art-ripple { 0% { opacity: .8; transform: scale(.3); } 100% { opacity: 0; transform: scale(1.3); } }
+      .art-gust { stroke-dasharray: 45 55; animation: art-gust 2.2s linear infinite; }
+      @keyframes art-gust { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+      .art-mote { opacity: 0; animation: art-drift 2.8s ease-in-out infinite; }
+      @keyframes art-drift { 0% { opacity: 0; transform: translateX(-4px); } 50% { opacity: 1; } 100% { opacity: 0; transform: translate(7px, -2px); } }
+      .art-rock { transform-origin: center; animation: art-float 3s ease-in-out infinite alternate; }
+      @keyframes art-float { from { transform: translateY(.7px) rotate(-5deg); } to { transform: translateY(-1.3px) rotate(6deg); } }
+
+      .menu-hero { grid-area: hero; display: flex; flex-direction: column; align-items: center; gap: 1rem; padding-top: .25rem; }
+      .logo { margin: 0; font-size: 3.75rem; font-weight: 800; line-height: 1; letter-spacing: -.035em; text-shadow: 0 2px 24px #0009; }
+      .logo span { color: var(--orange); }
+      #nickname {
+        box-sizing: border-box; width: min(18rem, 100%); padding: .6rem 1rem; border: 1px solid var(--line); border-radius: 999px;
+        background: var(--surface); text-align: center; font-weight: 600; transition: border-color .16s, box-shadow .16s;
+      }
+      #nickname::placeholder { color: var(--ink-dim); font-weight: 500; }
+      #nickname:hover { border-color: var(--line-hi); }
+      #nickname:focus { outline: none; border-color: var(--purple-hi); box-shadow: 0 0 0 3px #8b3cf54d; }
+      .menu-stage { grid-area: stage; }
+
+      /* The element's kit: hover or focus a square for its name; click to change its key. */
+      .menu-kit { grid-area: kit; display: flex; justify-content: center; gap: .85rem; margin: 0; padding: 0; list-style: none; }
+      .kit-skill {
+        position: relative; display: grid; place-items: center; width: 3.5rem; height: 3.5rem; padding: 0;
+        border: 1px solid var(--line); border-radius: .75rem; background: var(--surface);
+        transition: border-color .16s, background-color .16s, transform .16s var(--ease-out);
+      }
+      .kit-skill:hover:not(:disabled) { background: var(--surface-hi); border-color: var(--line-hi); transform: translateY(-2px); }
+      .kit-skill:focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
+      .kit-skill.ultimate { border-color: #f19a3ab3; box-shadow: 0 0 20px -6px var(--orange); }
+      .kit-skill.empty > svg { display: none; }
+      .kit-skill.empty { border-style: dashed; }
+      .kit-skill kbd { position: absolute; right: -6px; bottom: -6px; padding: 0 5px; border-radius: 4px; background: var(--purple-deep); font: 600 11px/18px system-ui, sans-serif; color: var(--ink); }
+      .kit-tip {
+        position: absolute; bottom: calc(100% + .65rem); left: 50%; translate: -50% 4px; padding: .4rem .65rem;
+        border: 1px solid var(--line); border-radius: .5rem; background: var(--well); white-space: nowrap; text-align: center;
+        font-size: 13px; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .14s, translate .14s var(--ease-out);
+      }
+      .kit-tip small { display: block; color: var(--ink-dim); font-size: 12px; font-weight: 500; }
+      .kit-tip .ult { color: var(--yellow); }
+      .kit-skill:hover .kit-tip, .kit-skill:focus-visible .kit-tip { opacity: 1; translate: -50% 0; }
+
+      /* One button per mode: each starts a new room of it. Duel leads. */
+      .menu-play { grid-area: play; display: flex; flex-direction: column; align-items: center; gap: .4rem; }
+      #mode-buttons { display: flex; align-items: center; justify-content: center; gap: 1rem; }
+      .mode-button {
+        display: flex; align-items: center; gap: .8rem; min-width: 14rem; padding: .75rem 1.25rem .75rem .85rem;
+        border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); text-align: left;
+        transition: border-color .16s, background-color .16s, transform .16s var(--ease-out);
+      }
+      .mode-button:hover:not(:disabled) { background: var(--surface-hi); border-color: var(--blue-hi); transform: translateY(-2px); }
+      .mode-button:active:not(:disabled) { transform: scale(.98); }
+      .mode-button:focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
+      .mode-icon { flex: none; display: grid; place-items: center; width: 2.6rem; height: 2.6rem; border-radius: 50%; background: var(--well); }
+      .mode-button strong { display: block; font-size: 1.05rem; line-height: 1.2; }
+      .mode-button small { display: block; color: var(--ink-dim); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+      .mode-button.primary {
+        min-width: 18rem; padding: 1rem 1.75rem 1rem 1rem; border-color: #c3a2ff59; color: #fff;
+        background: linear-gradient(135deg, var(--purple), var(--blue)); box-shadow: 0 14px 36px -12px #6a3cf5e6, inset 0 1px 0 #ffffff33;
+      }
+      .mode-button.primary:hover:not(:disabled) { background: linear-gradient(135deg, var(--purple-hi), var(--blue-hi)); border-color: var(--orange); }
+      .mode-button.primary .mode-icon { box-shadow: 0 0 0 2px var(--orange); }
+      .mode-button.primary .mode-icon { width: 3rem; height: 3rem; }
+      .mode-button.primary strong { font-size: 1.4rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+      .mode-button.primary small { color: #ddd6ff; }
+      /* Under each mode: Quick Play finds an open room of it (or starts one). */
+      .mode-card { display: flex; flex-direction: column; align-items: stretch; gap: .45rem; }
+      .quick-play-button { padding: .45rem .9rem; border: 1px solid var(--line-hi); border-radius: .6rem; background: #8b3cf526; font-weight: 600; font-size: 13px; transition: background-color .16s, border-color .16s; }
+      .quick-play-button:hover:not(:disabled) { border-color: var(--blue-hi); background: #8b3cf54d; }
+      .quick-play-button:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+      #lobby-error { min-height: 1.5em; margin: 0; color: #ff8f86; text-align: center; text-shadow: 0 1px 2px #000; }
+
+      .menu-rooms {
+        grid-area: rooms; align-self: center; justify-self: end; width: min(100%, 24rem); height: 50%; box-sizing: border-box;
+        display: flex; flex-direction: column; min-height: 14rem; padding: 1.1rem 1.1rem .5rem;
+        border: 1px solid var(--line); border-radius: 1rem; background: var(--surface);
+      }
+      .rooms-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+      #room-count { display: flex; align-items: center; gap: .4rem; color: var(--ink-dim); font-size: 13px; font-variant-numeric: tabular-nums; }
+      #room-count:not(:empty)::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+      #room-list { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -.5rem; padding: 0; list-style: none; }
+      #room-list li { display: flex; align-items: center; gap: .75rem; padding: .6rem .5rem; border-radius: .6rem; transition: background-color .16s; }
+      #room-list li:not(.empty):hover { background: #8b3cf51a; }
+      #room-list .title { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+      #room-list .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+      #room-list .mode, #room-list .players { color: var(--ink-dim); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+      #room-list .empty { flex-direction: column; gap: .25rem; padding: 2.5rem 1rem; color: var(--ink-dim); text-align: center; }
+      #room-list .empty strong { color: var(--ink); }
+      .join-button { padding: .4rem .9rem; border: 1px solid var(--line-hi); border-radius: .5rem; background: #8b3cf526; font-weight: 600; }
+      .join-button:hover:not(:disabled) { border-color: transparent; background: var(--blue); color: #fff; }
+      .join-button:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+      .join-button:disabled { border-color: transparent; background: transparent; }
+
+      #settings {
+        width: min(30rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); padding: 0;
+        border: 1px solid var(--line-hi); border-radius: 1rem; background: #120a2e; color: var(--ink); box-shadow: 0 24px 80px #000a, 0 0 60px -20px #8b3cf580;
+      }
+      #settings::backdrop { background: #07031acc; }
+      #settings[open] { animation: dialog-in .22s var(--ease-out); }
+      @keyframes dialog-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+      .dialog-head { display: flex; align-items: center; justify-content: space-between; padding: .85rem 1rem .85rem 1.25rem; border-bottom: 1px solid var(--line); }
+      .dialog-head h2 { margin: 0; font-size: 1.15rem; }
+      .dialog-head .icon-button { width: 2.25rem; height: 2.25rem; background: none; }
+      .dialog-body { display: grid; gap: 1.5rem; padding: 1.1rem 1.25rem 1.25rem; }
+      .dialog-body h3 { margin: 0 0 .65rem; font-size: .95rem; font-weight: 600; color: var(--ink-dim); }
+      .mode-setting { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .35rem 0; }
+      .mode-setting small { display: block; color: var(--ink-dim); font-size: 12px; }
+      .mode-setting input { width: 4.5rem; padding: .35rem .5rem; border: 1px solid var(--line); border-radius: .4rem; background: var(--well); font-variant-numeric: tabular-nums; }
+      .mode-setting input:focus-visible, .key-button:focus-visible, .key-reset:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+
+      @media (max-width: 1150px) {
+        .menu { grid-template-columns: clamp(15rem, 30vw, 20rem) minmax(0, 1fr) clamp(15rem, 30vw, 20rem); gap: 1rem 1.5rem; padding: 1.25rem; }
+        .logo { font-size: 3rem; }
+        .mode-button, .mode-button.primary { min-width: 0; }
+      }
+      /* Narrow or short: one scrolling column, the mage between the name and the play buttons. */
+      @media (max-width: 860px), (max-height: 600px) {
+        #lobby::before { background: linear-gradient(0deg, #0a0520e6, #0a052000 60%); }
+        .menu { height: auto; min-height: 100%; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "hero" "stage" "kit" "play" "side" "rooms"; padding-top: 1rem; }
+        .menu-stage { height: 40vh; min-height: 12rem; }
+        .menu-side { gap: 0; }
+        #open-settings { position: absolute; top: 1rem; left: 1rem; }
+        #element-picker { grid-template-columns: repeat(4, 1fr); }
+        .element-tile { padding: .9rem .25rem; }
+        .element-art { width: min(70%, 4.5rem); }
+        .menu-rooms { justify-self: stretch; width: auto; height: auto; }
+        #mode-buttons { flex-direction: column; align-items: stretch; width: min(22rem, 100%); }
+        #room-list { max-height: 50vh; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #lobby *, #lobby *::before, #settings { transition-duration: 0s !important; animation: none !important; }
+        .element-tile:hover, .kit-skill:hover:not(:disabled), .mode-button:hover:not(:disabled) { transform: none; }
+      }
+      .nametag { display: flex; flex-direction: column; align-items: center; gap: 3px; color: #fff; font-weight: 600; font-size: 13px; white-space: nowrap; text-shadow: 0 0 3px #000, 0 1px 2px #000; }
+      .nametag-title { display: flex; align-items: center; gap: 4px; }
+      .element-icon { flex: none; filter: drop-shadow(0 1px 1px #000a); }
+      #health-element { display: flex; }
+
+      #key-settings { display: grid; gap: .35rem; }
+      .key-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+      .key-name { display: flex; align-items: center; gap: .5rem; }
+      .key-button { min-width: 7.5rem; padding: .3rem .6rem; border: 1px solid var(--line); background: var(--well); font-weight: 600; }
+      .key-button:hover:not(:disabled) { background: var(--surface-hi); border-color: var(--line-hi); }
+      .key-button.listening { border-color: var(--orange); color: var(--yellow); }
+      .key-footer { display: flex; align-items: center; justify-content: space-between; gap: .5rem; min-height: 2rem; }
+      .key-message { color: #ff8f86; font-size: 13px; }
+      .key-reset { padding: .25rem .8rem; border: 1px solid var(--line-hi); background: #8b3cf526; }
+      .key-reset:hover:not(:disabled) { background: var(--blue); }
+      .key-reset:disabled { border-color: transparent; background: transparent; }
+
+      /* Green = health left, gray = health lost. */
+      .healthbar { width: 64px; height: 6px; border-radius: 3px; overflow: hidden; background: #8b929e; box-shadow: 0 0 0 1px #000c; }
+      .healthbar-fill { width: 100%; height: 100%; background: #3fb950; transition: width .15s ease-out; }
+      #health {
+        --el: var(--purple); position: fixed; left: 1.25rem; bottom: 1.25rem; display: flex; align-items: center; gap: .85rem;
+        padding: .45rem 1.1rem .45rem .45rem; border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+        box-shadow: 0 10px 30px -12px #000c; pointer-events: none; color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums;
+      }
+      /* The badge takes the element's colour, read off the icon the arena puts in it. */
+      #health:has([aria-label="Fire"]) { --el: #ff6a2b; }
+      #health:has([aria-label="Water"]) { --el: #3b8cff; }
+      #health:has([aria-label="Wind"]) { --el: #9be7d8; }
+      #health:has([aria-label="Earth"]) { --el: #b08850; }
+      #health-element {
+        display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%;
+        background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--el) 30%, var(--well)), var(--well) 70%);
+        box-shadow: inset 0 0 0 2px var(--el), 0 0 22px -6px var(--el);
+      }
+      #health-element svg { width: 40px; height: 40px; }
+      #health-text { min-width: 5.5em; font-size: 1.05rem; }
+      /* Capped so it never runs under the centred ability bar on narrower screens. */
+      /* Green = health left, the darker band = health lost. */
+      #health .healthbar { width: min(480px, calc(50vw - 26rem)); height: 22px; border-radius: 999px; background: #3a3458; box-shadow: inset 0 1px 3px #0009, 0 0 0 1px #000a; }
+      #health .healthbar-fill { border-radius: inherit; background: linear-gradient(180deg, #9cff7e, var(--green) 45%, #3fb82a); box-shadow: inset 0 1px 0 #ffffff66; }
+      /* One square per status effect on us, just above the health bar. */
+      #status-effects { position: fixed; left: 1.5rem; bottom: 6.5rem; display: flex; gap: .35rem; pointer-events: none; }
+      .status-effect { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 4px; background: #4a5163; box-shadow: 0 0 0 1px #000c, 0 2px 6px #0008; font-size: 13px; font-weight: 700; text-shadow: 0 1px 2px #000; }
+
+      #abilities { position: fixed; left: 50%; bottom: 1.25rem; transform: translateX(-50%); display: flex; gap: .5rem; pointer-events: none; }
+      .ability { --cooldown: 0; position: relative; display: grid; place-items: center; width: 52px; height: 52px; border-radius: .5rem; background: #171b23e6; box-shadow: 0 0 0 2px #ff8c2b, 0 4px 12px #0008; }
+      /* Dark sweep over the part of the cooldown still to go. */
+      .ability::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: conic-gradient(#000b calc(var(--cooldown) * 360deg), transparent 0); }
+      .ability.ultimate { margin-left: .5rem; box-shadow: 0 0 0 2px #ffd27a, 0 0 14px #ff6a2b99, 0 4px 12px #0008; }
+      .ability.cooling { box-shadow: 0 0 0 2px #4a5163, 0 4px 12px #0008; }
+      /* Death: the world drains of colour, the death panel replaces "Click to play". */
+      body.dead #game canvas { filter: grayscale(1) brightness(.55); transition: filter .4s; }
+      body.dead #overlay, body.dead #crosshair, body.dead #abilities { display: none; }
+      #death {
+        position: fixed; z-index: 2; inset: 0; display: grid; place-content: center; justify-items: center; gap: 1.1rem; color: var(--ink);
+        background: radial-gradient(ellipse at center, #3a0a2a80, #0a0520e6 75%);
+      }
+      #death h2 { margin: 0; font-size: 4rem; font-weight: 900; letter-spacing: -.02em; color: var(--red); text-shadow: 0 4px 30px #ff2d5566, 0 2px 4px #000; animation: title-in .5s var(--ease-out); }
+      @keyframes title-in { from { opacity: 0; transform: scale(1.12); letter-spacing: .1em; } }
+      .nametag.dead { opacity: .55; }
+      #respawn:disabled { font-variant-numeric: tabular-nums; }
+
+      #kill-feed { position: fixed; top: 1rem; right: 1rem; z-index: 2; display: flex; flex-direction: column; align-items: flex-end; gap: .3rem; margin: 0; padding: 0; list-style: none; pointer-events: none; }
+      #kill-feed li { display: flex; align-items: center; gap: .4rem; padding: .25rem .6rem; border-radius: .35rem; background: #0e1116b3; font-weight: 600; text-shadow: 0 1px 2px #000; transition: opacity .6s; }
+      #kill-feed li.mine { box-shadow: inset 0 0 0 1px #ff8c2b; }
+      #kill-feed li.fading { opacity: 0; }
+      #kill-feed .killer { color: #ffb347; }
+      #kill-feed .victim { color: #e6e9ef; }
+      .ability.empty { opacity: .35; box-shadow: 0 0 0 2px #4a5163, 0 4px 12px #0008; }
+      .ability.armed { box-shadow: 0 0 0 3px #ffd27a, 0 0 18px #ff8c2bcc; transform: translateY(-3px); }
+      .ability-cd { position: absolute; z-index: 1; font-weight: 700; font-size: 15px; text-shadow: 0 1px 2px #000; }
+      .ability-key { position: absolute; z-index: 1; right: -6px; bottom: -6px; padding: 0 5px; border-radius: 4px; background: #2b303b; font: 600 11px/18px system-ui, sans-serif; }
+      #room-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+      #room-list li { display: flex; align-items: center; gap: .75rem; padding: .5rem 0; border-top: 1px solid #232833; }
+      #room-list .title { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+      #room-list .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #room-list .mode { color: #7d8494; font-size: 12px; }
+      #room-list .players { color: #7d8494; font-variant-numeric: tabular-nums; }
+      #room-list .empty { color: #7d8494; justify-content: center; padding: 1rem 0; }
+      /* Duel: round, score and what happens next, top centre. */
+      #match-banner {
+        position: fixed; z-index: 3; top: 1rem; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: .3rem;
+        padding: .75rem 1.6rem; border: 1px solid var(--line-hi); border-radius: 1rem; background: var(--surface); box-shadow: 0 10px 30px -10px #000c, 0 0 40px -20px var(--purple);
+        pointer-events: none; text-align: center; color: var(--ink);
+      }
+      #match-score { color: var(--ink-dim); font-size: 1rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+      #match-headline { font-size: 1.6rem; font-weight: 800; letter-spacing: -.01em; color: var(--yellow); }
+      #match-headline:empty { display: none; }
+      #match-hint { font-size: 1rem; font-weight: 600; color: var(--ink); }
+      #match-hint:empty { display: none; }
+      /* Duel result: the whole view tinted until the next match is readied. Over the menu's dimming (clicks
+         pass through to it), under the banner; the title sits high so the menu's centre stays clear. */
+      #match-result { position: fixed; z-index: 2; inset: 0; display: grid; justify-items: center; align-items: start; padding-top: 18vh; pointer-events: none; }
+      #match-result[hidden] { display: none; }
+      /* Winner: the brand's purple and blue, rays turning behind a golden title. Loser: a cold, dimmed wine. */
+      #match-result.win { background: radial-gradient(ellipse at 50% 30%, #4560ffcc, #3a1a8ce6 45%, #0a0520f2 85%); }
+      #match-result.lose { background: radial-gradient(ellipse at 50% 30%, #6a1838cc, #2a0c26eb 50%, #0a0520f5 85%); }
+      #match-result.win::before {
+        content: ""; position: absolute; left: 50%; top: calc(18vh + 3.5rem); width: 140vmax; height: 140vmax; translate: -50% -50%; pointer-events: none;
+        background: repeating-conic-gradient(#fffb8a14 0 6deg, transparent 6deg 18deg);
+        mask-image: radial-gradient(circle, #000, transparent 45%); animation: rays-turn 40s linear infinite;
+      }
+      @keyframes rays-turn { to { rotate: 360deg; } }
+      /* The menu and death panel sit above the tint (their buttons must show); without their own dimming, so it stays vivid. */
+      #match-result:not([hidden]) ~ #overlay, #match-result:not([hidden]) ~ #death { background: none; }
+      #match-result-title {
+        position: relative; font-size: clamp(3rem, 9vw, 6rem); font-weight: 900; letter-spacing: .06em; text-transform: uppercase; color: #fff;
+        text-shadow: 0 4px 24px #000c, 0 0 2px #000; animation: title-in .6s var(--ease-out);
+      }
+      #match-result.win #match-result-title { color: var(--yellow); text-shadow: 0 0 40px #f19a3acc, 0 4px 24px #000c; }
+      #match-result.lose #match-result-title { color: #ffb3c0; opacity: .9; }
+      #ready { pointer-events: auto; min-width: 12rem; }
+      /* Ready already: the button now takes it back, so it steps down to the secondary look, marked green. */
+      #ready.is-ready { background: var(--surface); border-color: var(--green); box-shadow: 0 0 24px -10px var(--green); color: var(--ink); }
+      #death-note { margin: 0; color: var(--ink-dim); font-size: 1.05rem; }
+      @media (prefers-reduced-motion: reduce) {
+        .play-mouse .button-left, #death h2, #match-result-title, #match-result.win::before { animation: none; }
+        .btn-primary, .btn-secondary { transition: none; }
+      }
+      #lobby-error { min-height: 1.5em; margin: .75rem 0 0; color: #ff7b72; }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+
+    <section id="game-ui" hidden>
+      <div id="crosshair"></div>
+      <div id="hud">
+        <div id="status"></div>
+        <div><kbd>WASD</kbd> move · <kbd>Space</kbd> jump · click to cast · <kbd data-key="main">Z</kbd> <span data-skill-name="main"></span><span data-skill-help="second"> · <kbd data-key="second">X</kbd> <span data-skill-name="second"></span></span><span data-skill-help="third"> · <kbd data-key="third">C</kbd> <span data-skill-name="third"></span></span><span data-skill-help="ultimate"> · <kbd data-key="ultimate">R</kbd> <span data-skill-name="ultimate"></span></span>, right click to cancel · mouse look · <kbd>Esc</kbd> release mouse</div>
+      </div>
+      <div id="status-effects"></div>
+      <div id="health">
+        <span id="health-element"></span>
+        <div class="healthbar"><div class="healthbar-fill" id="health-fill"></div></div>
+        <span id="health-text"></span>
+      </div>
+      <div id="abilities">
+        <!-- icons and names inserted by hud/hud.ts from our element's kit (shared with the kill feed) -->
+        <div class="ability" id="ability-main">
+          <span class="ability-cd" id="ability-main-cd"></span>
+          <kbd class="ability-key" data-key="main">Z</kbd>
+        </div>
+        <div class="ability" id="ability-second">
+          <span class="ability-cd" id="ability-second-cd"></span>
+          <kbd class="ability-key" data-key="second">X</kbd>
+        </div>
+        <div class="ability" id="ability-third">
+          <span class="ability-cd" id="ability-third-cd"></span>
+          <kbd class="ability-key" data-key="third">C</kbd>
+        </div>
+        <div class="ability ultimate" id="ability-ultimate">
+          <span class="ability-cd" id="ability-ultimate-cd"></span>
+          <kbd class="ability-key" data-key="ultimate">R</kbd>
+        </div>
+      </div>
+      <ul id="kill-feed"></ul>
+      <div id="match-result" hidden>
+        <div id="match-result-title"></div>
+      </div>
+      <div id="match-banner" hidden>
+        <div id="match-score"></div>
+        <div id="match-headline"></div>
+        <div id="match-hint"></div>
+      </div>
+      <div id="death" hidden>
+        <h2>You died</h2>
+        <p id="death-note" hidden></p>
+        <button id="respawn" class="btn-primary" type="button">Respawn</button>
+      </div>
+      <div id="overlay">
+        <svg class="play-mouse" viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <path class="button-left" d="M12 3.5H11a5 5 0 0 0-5 5V10h6z" stroke="none" />
+          <rect x="6" y="3.5" width="12" height="17" rx="6" />
+          <path d="M6 10h12M12 3.5V10" />
+        </svg>
+        <h2 id="overlay-title">Click to play</h2>
+        <button id="ready" class="btn-primary" type="button" hidden>Ready</button>
+        <button id="leave" class="btn-secondary" type="button">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11" /></svg>
+          Leave room
+        </button>
+      </div>
+    </section>
+
+    <section id="lobby">
+      <div class="menu">
+        <div class="menu-side">
+          <button id="open-settings" class="icon-button" type="button" aria-label="Settings" aria-haspopup="dialog" aria-controls="settings">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
+          <section aria-labelledby="elements-title">
+            <h2 id="elements-title">Elements</h2>
+            <div id="element-picker" role="radiogroup" aria-labelledby="elements-title"></div>
+          </section>
+        </div>
+
+        <header class="menu-hero">
+          <h1 class="logo">Ligm<span>.io</span></h1>
+          <label class="visually-hidden" for="nickname">Nickname</label>
+          <input id="nickname" placeholder="Your nickname" autocomplete="off" spellcheck="false" />
+        </header>
+        <!-- Left empty: render/showcase.ts frames the 3D mage into this box. -->
+        <div id="stage" class="menu-stage" aria-hidden="true"></div>
+        <ul id="skill-kit" class="menu-kit" aria-label="Skills"></ul>
+        <div class="menu-play">
+          <div id="mode-buttons" role="group" aria-label="Play a mode"></div>
+          <p id="lobby-error" role="alert"></p>
+        </div>
+
+        <aside class="menu-rooms" aria-labelledby="rooms-title">
+          <div class="rooms-head">
+            <h2 id="rooms-title">Rooms</h2>
+            <span id="room-count"></span>
+          </div>
+          <ul id="room-list"></ul>
+        </aside>
+      </div>
+
+      <dialog id="settings" aria-labelledby="settings-title">
+        <div class="dialog-head">
+          <h2 id="settings-title">Settings</h2>
+          <button id="close-settings" class="icon-button" type="button" aria-label="Close settings">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+        <div class="dialog-body">
+          <section aria-labelledby="keys-title">
+            <h3 id="keys-title">Skill keys</h3>
+            <div id="key-settings"></div>
+          </section>
+          <section aria-labelledby="room-setup-title">
+            <h3 id="room-setup-title">Rooms you start</h3>
+            <label class="mode-setting">
+              <span>Free-for-all players</span>
+              <input id="ffa-players" type="number" inputmode="numeric" />
+            </label>
+            <label class="mode-setting">
+              <span>Battle royale players</span>
+              <input id="br-players" type="number" inputmode="numeric" />
+            </label>
+            <label class="mode-setting">
+              <span>Rounds to win <small>Duel and battle royale</small></span>
+              <input id="rounds-to-win" type="number" inputmode="numeric" />
+            </label>
+          </section>
+        </div>
+      </dialog>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
