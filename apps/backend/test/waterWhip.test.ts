@@ -65,6 +65,7 @@ function fakeRoom() {
     addGroundZone: () => 0,
     seenBy: (sessionId) => seenAgo(lagOf(sessionId)),
     lagOf,
+    canAct: (sessionId: string) => (state.players.get(sessionId)?.hp ?? 0) > 0,
     seenAgo,
   };
   const skill = new WaterWhipSkill(room);

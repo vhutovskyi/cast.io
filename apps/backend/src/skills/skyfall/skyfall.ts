@@ -66,7 +66,7 @@ export class SkyfallSkill implements ServerSkill {
 
   private rise(sessionId: string, fromInput: boolean) {
     const caster = this.room.state.players.get(sessionId);
-    if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "skyfall")) { return; }
+    if (!caster || !this.room.canAct(sessionId) || !hasSkill(caster.element, "skyfall")) { return; }
     if (this.flights.has(sessionId)) { return; }
 
     const now = this.room.clock.currentTime;
@@ -115,7 +115,7 @@ export class SkyfallSkill implements ServerSkill {
    */
   afterInput(sessionId: string, player: Player) {
     const flight = this.flights.get(sessionId);
-    if (!flight || flight.dropping || player.hp <= 0) { return; }
+    if (!flight || flight.dropping || !this.room.canAct(sessionId)) { return; }
     flight.steps++;
     if ((flight.target && skyfallRisen(player)) || flight.steps >= SKYFALL_SOAR_STEPS) {
       this.leap(sessionId, flight, flight.target ?? player);
@@ -132,7 +132,7 @@ export class SkyfallSkill implements ServerSkill {
     const now = this.room.clock.currentTime;
     for (const [casterId, flight] of this.flights) {
       const caster = this.room.state.players.get(casterId);
-      if (!caster || caster.hp <= 0) {
+      if (!caster || !this.room.canAct(casterId)) {
         this.flights.delete(casterId);
         continue;
       }

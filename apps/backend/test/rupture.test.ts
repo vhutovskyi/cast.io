@@ -55,6 +55,7 @@ function fakeRoom() {
     addGroundZone() { return 0; },
     seenBy: () => LIVE,
     lagOf: () => lag.ms,
+    canAct: (sessionId: string) => (state.players.get(sessionId)?.hp ?? 0) > 0,
     seenAgo(lagMs: number): SeenAt {
       lag.asked.push(lagMs);
       return lagMs > 0 ? (player) => lag.past.get(player) ?? player : LIVE;

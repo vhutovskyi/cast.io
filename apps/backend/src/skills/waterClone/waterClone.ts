@@ -77,7 +77,7 @@ export class WaterCloneSkill implements ServerSkill {
   cast(client: Client, message: unknown) {
     const ownerId = client.sessionId;
     const caster = this.room.state.players.get(ownerId);
-    if (!caster || caster.hp <= 0 || isWaterClone(caster) || !hasSkill(caster.element, "water_clone")) { return; }
+    if (!caster || !this.room.canAct(ownerId) || isWaterClone(caster) || !hasSkill(caster.element, "water_clone")) { return; }
 
     const { yaw, pitch } = (message ?? {}) as Partial<WaterCloneAim>;
     if (typeof yaw !== "number" || typeof pitch !== "number" || !Number.isFinite(yaw) || !Number.isFinite(pitch)) { return; }
@@ -119,7 +119,7 @@ export class WaterCloneSkill implements ServerSkill {
     for (const clone of [...this.clones.values()]) {
       const owner = this.room.state.players.get(clone.ownerId);
       const body = this.room.state.players.get(clone.id);
-      if (!owner || owner.hp <= 0) { this.end(clone, "owner"); continue; }
+      if (!owner || !this.room.canAct(clone.ownerId)) { this.end(clone, "owner"); continue; }
       if (!body || body.hp <= 0) { this.end(clone, "killed"); continue; }
       if (this.room.clock.currentTime >= clone.expiresAt) { this.end(clone, "expired"); continue; }
       this.drive(clone, body, dt);

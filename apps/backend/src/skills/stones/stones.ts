@@ -49,7 +49,7 @@ export class StonesSkill implements ServerSkill {
    */
   cast(client: Client, message: unknown) {
     const caster = this.room.state.players.get(client.sessionId);
-    if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "stones")) { return; }
+    if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "stones")) { return; }
 
     const { yaw } = (message ?? {}) as Partial<StonesAim>;
     if (typeof yaw !== "number" || !Number.isFinite(yaw)) { return; }

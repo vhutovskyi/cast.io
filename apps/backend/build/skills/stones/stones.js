@@ -20,7 +20,7 @@ export class StonesSkill {
      */
     cast(client, message) {
         const caster = this.room.state.players.get(client.sessionId);
-        if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "stones")) {
+        if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "stones")) {
             return;
         }
         const { yaw } = (message ?? {});

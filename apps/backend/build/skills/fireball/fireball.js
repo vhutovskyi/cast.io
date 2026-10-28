@@ -19,7 +19,7 @@ export class FireballSkill {
      */
     cast(client, message) {
         const caster = this.room.state.players.get(client.sessionId);
-        if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "fireball")) {
+        if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "fireball")) {
             return;
         }
         const { yaw, pitch } = (message ?? {});

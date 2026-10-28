@@ -20,7 +20,7 @@ export class TorrentSkill {
      */
     cast(client, message) {
         const caster = this.room.state.players.get(client.sessionId);
-        if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "torrent")) {
+        if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "torrent")) {
             return;
         }
         const { x, y } = (message ?? {});

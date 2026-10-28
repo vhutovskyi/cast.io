@@ -24,7 +24,7 @@ export class TorrentSkill implements ServerSkill {
    */
   cast(client: Client, message: unknown) {
     const caster = this.room.state.players.get(client.sessionId);
-    if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "torrent")) { return; }
+    if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "torrent")) { return; }
 
     const { x, y } = (message ?? {}) as Partial<TorrentCast>;
     if (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) { return; }

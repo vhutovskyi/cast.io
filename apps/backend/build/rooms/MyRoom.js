@@ -43,7 +43,7 @@ const DEBUG_DAMAGE = 10;
  * its round trip) on a sluggish connection. Past it, a victim long behind a
  * wall on their own screen is spared.
  */
-const MAX_REWIND_MS = 400;
+export const MAX_REWIND_MS = 400;
 /**
  * Room names and nicknames are player-typed text broadcast to other players:
  * keep printable characters only, collapse whitespace, cap the length.
@@ -75,6 +75,15 @@ export class MyRoom extends Room {
         });
         /** Hands each player's inputs to the step at a steady pace. */
         this.pacer = new InputPacer();
+        /**
+         * Whoever a hit took to 0 since the last step ended, with the hit that did
+         * it: cast messages between steps, then the step itself. Their body is dead
+         * at once — 0 health, so nothing targets, pushes, launches or slows it —
+         * but they keep acting (`canAct`) until the step is done, then all die
+         * together: two mages who kill each other on the same step both go down,
+         * whoever's turn or message came first.
+         */
+        this.dying = new Map();
         /** The map's ground, set in `onCreate`: everyone stands on it. */
         this.terrain = FLAT;
         /** All of the above, for what the room does with every skill alike. */
@@ -127,11 +136,12 @@ export class MyRoom extends Room {
      * The single way health goes down: whole points, never below zero, scaled
      * by the victim's status effects. Attacks call this once they have resolved
      * a hit on the server. A survived hit with a `source` applies that ability's
-     * on-hit effects; the hit that takes a player to 0 clears their effects,
-     * tells the game mode and goes out to the kill feed. Ignored while the mode
-     * says hits don't count (a duel between rounds), and on a player out of
-     * reach (under the ground). A Water Clone takes no hits from its owner, and
-     * its death is nobody's kill: the clone's skill clears it away next step.
+     * on-hit effects; the hit that takes a player to 0 leaves a body that is
+     * dead to every hit and effect from then on, and kills them (`die`) at the
+     * end of the step (`dying`). A Water Clone, which never acts, dies at
+     * once. Ignored while the mode says hits don't count (a duel between
+     * rounds), and on a player out of reach (under the ground). A Water Clone
+     * takes no hits from its owner.
      */
     damage(sessionId, amount, source, options) {
         const player = this.state.players.get(sessionId);
@@ -141,23 +151,41 @@ export class MyRoom extends Room {
         if (sparedAsOwnClone(player, source?.id)) {
             return;
         }
-        player.hp = Math.max(0, player.hp - Math.round(amount * this.effects.damageTakenScale(sessionId)));
-        if (player.hp === 0 && isWaterClone(player)) {
-            this.effects.clear(sessionId);
-            clearForcedMotion(player);
+        const hp = Math.max(0, player.hp - Math.round(amount * this.effects.damageTakenScale(sessionId)));
+        player.hp = hp;
+        if (hp > 0) {
+            if (source && !options?.fromEffect) {
+                this.effects.applyOnHit(sessionId, source);
+            }
         }
-        else if (player.hp === 0) {
-            this.effects.clear(sessionId);
-            // A body doesn't keep sliding or hover in the sky: it falls where it died.
-            clearForcedMotion(player);
-            this.mode.died(sessionId);
-            this.broadcast(SERVER_MESSAGE.kill, {
-                victimId: sessionId, victimName: player.name, killer: source,
-            });
+        else if (isWaterClone(player)) {
+            this.die(sessionId, player, source);
         }
-        else if (source && !options?.fromEffect) {
-            this.effects.applyOnHit(sessionId, source);
+        else {
+            this.dying.set(sessionId, source);
         }
+    }
+    /** `SkillRoom.canAct`: alive, or killed since the last step ended (`dying`). */
+    canAct(sessionId) {
+        const player = this.state.players.get(sessionId);
+        return player !== undefined && (player.hp > 0 || this.dying.has(sessionId));
+    }
+    /**
+     * A body at 0 health dies: clears their effects, tells the game mode and
+     * goes out to the kill feed. A Water Clone's death is nobody's kill: the
+     * clone's skill clears it away next step.
+     */
+    die(sessionId, player, source) {
+        this.effects.clear(sessionId);
+        // A body doesn't keep sliding or hover in the sky: it falls where it died.
+        clearForcedMotion(player);
+        if (isWaterClone(player)) {
+            return;
+        }
+        this.mode.died(sessionId);
+        this.broadcast(SERVER_MESSAGE.kill, {
+            victimId: sessionId, victimName: player.name, killer: source,
+        });
     }
     onCreate(options) {
         const quickPlay = options?.quickPlay === true;
@@ -240,7 +268,8 @@ export class MyRoom extends Room {
     }
     /**
      * Everyone back to full health, and nothing left over from before: no
-     * effects, cooldowns, projectiles, charging strikes or ground fire. Clients
+     * effects, cooldowns, projectiles, charging strikes, ground fire or deaths
+     * still to land. Clients
      * hear about it after the patch with the new positions, so they can face
      * where they now stand.
      */
@@ -248,6 +277,7 @@ export class MyRoom extends Room {
         for (const skill of this.skills) {
             skill.reset();
         }
+        this.dying.clear();
         for (const player of this.state.players.values()) {
             clearForcedMotion(player);
         }
@@ -266,6 +296,7 @@ export class MyRoom extends Room {
             broadcast: (type, message) => this.broadcast(type, message),
             send: (sessionId, type, message) => this.clients.getById(sessionId)?.send(type, message),
             damage: (sessionId, amount, source, options) => this.damage(sessionId, amount, source, options),
+            canAct: (sessionId) => this.canAct(sessionId),
             // Out of reach (under the ground), only their own effects land on them.
             // Nothing of a Water Clone's owner lands on it.
             applyEffect: (sessionId, id, source, durationMs) => ((this.untargetable(sessionId) && source?.id !== sessionId) || sparedAsOwnClone(this.state.players.get(sessionId), source?.id)
@@ -377,7 +408,9 @@ export class MyRoom extends Room {
      * is exactly the set the server applied. A client that sends nothing simply
      * does not move — an empty tick advances no one. Flame Breath channels in
      * step with those inputs; fireballs and Twin Dragons fly after, then ground zones apply
-     * their effects and effects tick and wear off.
+     * their effects and effects tick and wear off. Whoever was killed since the
+     * last step — by this one or a cast between — dies after all of that
+     * (`dying`), before the mode judges the step.
      */
     step(ctx) {
         for (const [sessionId, player] of this.state.players) {
@@ -389,16 +422,17 @@ export class MyRoom extends Room {
             // bursty connection doesn't turn into a freeze-then-teleport.
             for (const input of this.pacer.take(sessionId, channel)) {
                 // A skill that moves them, pressed on this step, starts before it — as their client predicted.
-                if (player.hp > 0) {
+                if (this.canAct(sessionId)) {
                     this.act(sessionId, player, input);
                 }
                 // Dead players' inputs are still consumed (so nothing replays after
                 // respawn) but replaced: they can't walk, jump or breathe, only fall.
+                // Killed this step, they still act on it.
                 // The living breathe only when the skill allows it — before the step,
                 // since breathing slows the walk.
                 // Status effects limit it all: a slow, a freeze that stops walking,
                 // jumping and breathing — read from the synced list, as the client does.
-                const command = player.hp > 0 ? this.flameBreath.vet(sessionId, player, input, canCast(player.effects)) : deadInput(player.yaw);
+                const command = this.canAct(sessionId) ? this.flameBreath.vet(sessionId, player, input, canCast(player.effects)) : deadInput(player.yaw);
                 // Under the ground, walls don't stop them: the client predicts the same from the synced effects.
                 const walls = blockedByWalls(player.effects) ? this.state.walls.values() : [];
                 stepEntity(player, command, ctx.dt, moveLimits(player.effects), walls, this.terrain);
@@ -414,6 +448,13 @@ export class MyRoom extends Room {
         }
         this.zones.step();
         this.effects.step();
+        for (const [sessionId, source] of this.dying) {
+            const player = this.state.players.get(sessionId);
+            if (player) {
+                this.die(sessionId, player, source);
+            }
+        }
+        this.dying.clear();
         this.mode.step();
     }
     /**

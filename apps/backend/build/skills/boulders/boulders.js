@@ -22,7 +22,7 @@ export class BouldersSkill {
     /** Raises a boulder just ahead of the caster, if they may: not too soon, not too many. */
     raise(client) {
         const caster = this.room.state.players.get(client.sessionId);
-        if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "boulders")) {
+        if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "boulders")) {
             return;
         }
         const now = this.room.clock.currentTime;
@@ -47,7 +47,7 @@ export class BouldersSkill {
      */
     kick(client, message) {
         const caster = this.room.state.players.get(client.sessionId);
-        if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "boulders")) {
+        if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "boulders")) {
             return;
         }
         const { yaw } = (message ?? {});

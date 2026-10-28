@@ -95,7 +95,7 @@ export class FlameBreathSkill {
     const channel = this.channels.get(sessionId);
     if (!channel) { return; }
     const stalled = this.room.clock.currentTime > channel.startedAt + FLAME_BREATH.maxChannelMs + STALL_GRACE_MS;
-    if (player.hp <= 0 || stalled) { this.end(sessionId, player); }
+    if (!this.room.canAct(sessionId) || stalled) { this.end(sessionId, player); }
   }
 
   /** The player left: their channel and cooldown go with them. */
@@ -115,7 +115,7 @@ export class FlameBreathSkill {
   }
 
   private canBreathe(sessionId: string, player: Player) {
-    if (player.hp <= 0 || !hasSkill(player.element, "flame_breath")) { return false; }
+    if (!this.room.canAct(sessionId) || !hasSkill(player.element, "flame_breath")) { return false; }
     if (this.room.clock.currentTime < (this.readyAt.get(sessionId) ?? 0)) { return false; }
     const channel = this.channels.get(sessionId);
     return !channel || channel.elapsedMs < FLAME_BREATH.maxChannelMs - EPSILON;

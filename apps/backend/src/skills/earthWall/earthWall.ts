@@ -46,7 +46,7 @@ export class EarthWallSkill implements ServerSkill {
    */
   cast(client: Client, message: unknown) {
     const caster = this.room.state.players.get(client.sessionId);
-    if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "earth_wall")) { return; }
+    if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "earth_wall")) { return; }
 
     const { x, y } = (message ?? {}) as Partial<EarthWallCast>;
     if (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) { return; }
@@ -82,7 +82,7 @@ export class EarthWallSkill implements ServerSkill {
   detonate(client: Client) {
     const caster = this.room.state.players.get(client.sessionId);
     const standing = this.standing.get(client.sessionId);
-    if (!caster || caster.hp <= 0 || !standing) { return; }
+    if (!caster || !this.room.canAct(client.sessionId) || !standing) { return; }
     if (this.room.clock.currentTime < standing.detonateAt) { return; }
     const wall = this.room.state.walls.get(standing.id);
     if (!wall) { return; }

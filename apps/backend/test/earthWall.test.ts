@@ -38,6 +38,7 @@ function fakeRoom() {
     addGroundZone: () => 0,
     seenBy: () => seen,
     lagOf: () => 0,
+    canAct: (sessionId: string) => (state.players.get(sessionId)?.hp ?? 0) > 0,
     seenAgo: () => LIVE,
   };
   const skill = new EarthWallSkill(room);

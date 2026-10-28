@@ -42,7 +42,7 @@ export class FireballSkill {
    */
   cast(client: Client, message: unknown) {
     const caster = this.room.state.players.get(client.sessionId);
-    if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "fireball")) { return; }
+    if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "fireball")) { return; }
 
     const { yaw, pitch } = (message ?? {}) as Partial<FireballAim>;
     if (typeof yaw !== "number" || typeof pitch !== "number" || !Number.isFinite(yaw) || !Number.isFinite(pitch)) { return; }

@@ -26,6 +26,7 @@ function fakeRoom(abilityEffects = {}) {
   const room = {
     state,
     clock,
+    canAct: (sessionId: string) => (state.players.get(sessionId)?.hp ?? 0) > 0,
     damage(sessionId: string, amount: number, source?: DamageSource, options?: DamageOptions) {
       const player = state.players.get(sessionId);
       if (!player || player.hp <= 0) { return; }

@@ -19,7 +19,7 @@ export class RuptureSkill {
      */
     cast(client, message) {
         const caster = this.room.state.players.get(client.sessionId);
-        if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "rupture")) {
+        if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "rupture")) {
             return;
         }
         const { yaw } = (message ?? {});

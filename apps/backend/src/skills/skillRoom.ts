@@ -42,6 +42,13 @@ export interface SkillRoom {
    */
   damage(sessionId: string, amount: number, source?: DamageSource, options?: DamageOptions): void;
   /**
+   * Whether `sessionId` may still act — cast, or keep up something they
+   * drive (a channel, a leap, a dig): alive, or killed since the last step
+   * ended, since deaths land together at its end. Their body is dead at once
+   * (0 health), so whether a body can be hit, pushed or slowed is `hp > 0`.
+   */
+  canAct(sessionId: string): boolean;
+  /**
    * Puts a status effect on a living player — for `durationMs`, or the
    * effect's own duration — never cutting what's left of it short. False if
    * there is none to apply it to.

@@ -52,7 +52,7 @@ export class FreezingStreamSkill implements ServerSkill {
    */
   cast(client: Client, message: unknown) {
     const caster = this.room.state.players.get(client.sessionId);
-    if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "freezing_stream")) { return; }
+    if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "freezing_stream")) { return; }
 
     const { yaw, pitch } = (message ?? {}) as Partial<FreezingStreamAim>;
     if (typeof yaw !== "number" || typeof pitch !== "number" || !Number.isFinite(yaw) || !Number.isFinite(pitch)) { return; }

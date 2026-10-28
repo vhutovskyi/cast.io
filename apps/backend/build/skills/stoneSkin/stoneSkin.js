@@ -17,7 +17,7 @@ export class StoneSkinSkill {
     /** Hardens the caster, if they may. Early casts are dropped silently; there is no payload to check. */
     cast(client) {
         const caster = this.room.state.players.get(client.sessionId);
-        if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "stone_skin")) {
+        if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "stone_skin")) {
             return;
         }
         const now = this.room.clock.currentTime;
@@ -39,7 +39,7 @@ export class StoneSkinSkill {
         const now = this.room.clock.currentTime;
         for (const [casterId, skin] of this.hardened) {
             const caster = this.room.state.players.get(casterId);
-            if (!caster || caster.hp <= 0 || now >= skin.until) {
+            if (!caster || !this.room.canAct(casterId) || now >= skin.until) {
                 this.hardened.delete(casterId);
                 continue;
             }

@@ -29,7 +29,7 @@ export class EarthWallSkill {
      */
     cast(client, message) {
         const caster = this.room.state.players.get(client.sessionId);
-        if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "earth_wall")) {
+        if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "earth_wall")) {
             return;
         }
         const { x, y } = (message ?? {});
@@ -65,7 +65,7 @@ export class EarthWallSkill {
     detonate(client) {
         const caster = this.room.state.players.get(client.sessionId);
         const standing = this.standing.get(client.sessionId);
-        if (!caster || caster.hp <= 0 || !standing) {
+        if (!caster || !this.room.canAct(client.sessionId) || !standing) {
             return;
         }
         if (this.room.clock.currentTime < standing.detonateAt) {

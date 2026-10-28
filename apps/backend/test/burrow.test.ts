@@ -65,6 +65,7 @@ function fakeRoom() {
     seenAsked: [] as string[],
     seenBy(sessionId: string): SeenAt { room.seenAsked.push(sessionId); return room.seen; },
     lagOf: () => 0,
+    canAct: (sessionId: string) => (state.players.get(sessionId)?.hp ?? 0) > 0,
     seenAgo: () => LIVE,
   };
   const skill = new BurrowSkill(room);

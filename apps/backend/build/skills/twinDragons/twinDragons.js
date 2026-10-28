@@ -19,7 +19,7 @@ export class TwinDragonsSkill {
      */
     cast(client, message) {
         const caster = this.room.state.players.get(client.sessionId);
-        if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "twin_dragons")) {
+        if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "twin_dragons")) {
             return;
         }
         const { x, y } = (message ?? {});

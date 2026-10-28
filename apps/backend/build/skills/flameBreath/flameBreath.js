@@ -77,7 +77,7 @@ export class FlameBreathSkill {
             return;
         }
         const stalled = this.room.clock.currentTime > channel.startedAt + FLAME_BREATH.maxChannelMs + STALL_GRACE_MS;
-        if (player.hp <= 0 || stalled) {
+        if (!this.room.canAct(sessionId) || stalled) {
             this.end(sessionId, player);
         }
     }
@@ -98,7 +98,7 @@ export class FlameBreathSkill {
         this.readyAt.clear();
     }
     canBreathe(sessionId, player) {
-        if (player.hp <= 0 || !hasSkill(player.element, "flame_breath")) {
+        if (!this.room.canAct(sessionId) || !hasSkill(player.element, "flame_breath")) {
             return false;
         }
         if (this.room.clock.currentTime < (this.readyAt.get(sessionId) ?? 0)) {

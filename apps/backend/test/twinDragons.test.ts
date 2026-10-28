@@ -38,6 +38,7 @@ function fakeRoom() {
     addGroundZone: () => 0,
     seenBy: () => LIVE,
     lagOf: () => lag,
+    canAct: (sessionId: string) => (state.players.get(sessionId)?.hp ?? 0) > 0,
     seenAgo: (lagMs) => (lagMs > 0 ? (player) => past.get(player) ?? player : LIVE),
   };
   const skill = new TwinDragonsSkill(room);

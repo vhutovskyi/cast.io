@@ -2,7 +2,7 @@ import assert from "assert";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 
 import appConfig from "../src/app.config.js";
-import { MyRoomState, type MoveInput } from "../src/rooms/schema/MyRoomState.js";
+import { MyRoomState, type MoveInput, type Player } from "../src/rooms/schema/MyRoomState.js";
 import { PLAYER_SPEED, TICK_RATE, GRAVITY, JUMP_SPEED, ROOM_NAME_MAX, NICKNAME_MAX, MAX_HP, PLAYER_HALF, ARENA_WIDTH, ARENA_HEIGHT, RESPAWN_DELAY_MS, EYE_HEIGHT } from "../src/shared/constants.js";
 import { SUN_STRIKE, type SunStrikeCharging, type SunStrikeHit } from "../src/skills/sunStrike/sunStrikeConfig.js";
 import { FIREBALL, FIREBALL_LAUNCH_SPEED, fireballLanding, fireballPosition, launchFireball, type FireballCast, type FireballHit } from "../src/skills/fireball/fireballConfig.js";
@@ -12,18 +12,21 @@ import { STONE_SKIN } from "../src/skills/stoneSkin/stoneSkinConfig.js";
 import { BOULDERS, type BoulderHit, type BoulderKicked, type BoulderRaised } from "../src/skills/boulders/bouldersConfig.js";
 import { ELEMENT_KITS, type ElementKit } from "../src/shared/skills.js";
 import { TORRENT, type TorrentCharging, type TorrentHit } from "../src/skills/torrent/torrentConfig.js";
+import { RUPTURE, RUPTURE_TRAVEL_MS } from "../src/skills/rupture/ruptureConfig.js";
+import { FREEZING_STREAM } from "../src/skills/freezingStream/freezingStreamConfig.js";
+import { WHIP_SHARD } from "../src/skills/waterWhip/whipShardConfig.js";
 import { WATER_WHIP, whipStrike, type WaterWhipCast } from "../src/skills/waterWhip/waterWhipConfig.js";
 import { TWIN_DRAGONS, twinDragonsPoint, type TwinDragonsLaunch, type TwinDragonsHeads, type TwinDragonsBlast } from "../src/skills/twinDragons/twinDragonsConfig.js";
 import { CLIENT_MESSAGE, SERVER_MESSAGE } from "../src/shared/messages.js";
 import type { DamageSource, KillEvent } from "../src/shared/combat.js";
 import { StatusEffects } from "../src/effects/statusEffects.js";
-import { sanitizeText, type MyRoom } from "../src/rooms/MyRoom.js";
+import { MAX_REWIND_MS, sanitizeText, type MyRoom } from "../src/rooms/MyRoom.js";
 import type { InputPacer } from "../src/rooms/inputPacer.js";
 import { BATTLE_ROYALE, DUEL, FFA, type GameModeId } from "../src/shared/gameModes.js";
 import { DEFAULT_MAP, MAPS, MAP_TERRAIN, PLAYABLE_MAPS, parseMap } from "../src/shared/maps.js";
 import { INPUT_ACTION } from "../src/shared/actions.js";
 import { stepEntity } from "../src/shared/movement.js";
-import { blockedByWalls, moveLimits } from "../src/effects/effectConfig.js";
+import { blockedByWalls, canCast, moveLimits } from "../src/effects/effectConfig.js";
 import { BURROW_DIG_STEPS } from "../src/skills/burrow/burrowConfig.js";
 // The client's own prediction of these skills: run here exactly as its reconciler does.
 import { ActionPrediction } from "../../frontend/src/net/actionPrediction.js";
@@ -37,6 +40,39 @@ describe("testing your Colyseus app", () => {
   beforeEach(async () => {
     await colyseus.cleanup();
   });
+
+  type TestRoom = { state: MyRoomState; waitForNextMessage(): Promise<unknown>; waitForNextTimestep(): Promise<unknown> };
+  type TestClient = { sessionId: string; input<T>(options: { mode: "reliable" }): { data: T; send(): void } };
+
+  /**
+   * Two fire mages, one burn from death each, breathe at each other face to
+   * face until the round is decided. Both breaths are held back until both
+   * have arrived, so they run on the same step. The flames burn whoever the
+   * breather saw in them, so both stand there for a whole rewind window first.
+   */
+  async function breatheEachOtherDown(room: TestRoom, a: TestClient, b: TestClient) {
+    const arena = room as unknown as MyRoom;
+    const [pa, pb] = [a, b].map((c) => room.state.players.get(c.sessionId));
+    Object.assign(pa, { x: 400, y: 340, yaw: 0 });
+    Object.assign(pb, { x: 400, y: 260, yaw: Math.PI });
+    arena.damage(a.sessionId, MAX_HP - FLAME_BREATH.tickDamage);
+    arena.damage(b.sessionId, MAX_HP - FLAME_BREATH.tickDamage);
+    await new Promise((r) => setTimeout(r, MAX_REWIND_MS + 100));
+
+    const pacer = (arena as unknown as { pacer: InputPacer }).pacer;
+    const take = pacer.take.bind(pacer);
+    let held = true;
+    pacer.take = (sessionId, queue) => held ? [] : take(sessionId, queue);
+    for (const [client, yaw] of [[a, 0], [b, Math.PI]] as const) {
+      const input = client.input<MoveInput>({ mode: "reliable" });
+      Object.assign(input.data, { yaw, breath: true });
+      input.send();
+    }
+    const queued = () => [a, b].every((c) => arena.inputs.get(c.sessionId).size > 0);
+    while (!queued()) { await room.waitForNextMessage(); }
+    held = false;
+    while (room.state.match.phase === "fighting") { await room.waitForNextTimestep(); }
+  }
 
   it("advances a player from its buffered input", async () => {
     const room = await colyseus.createRoom<MyRoomState>("my_room", {});
@@ -174,6 +210,7 @@ describe("testing your Colyseus app", () => {
     assert.strictEqual(player.hp, MAX_HP - 40, "no healing or poisoning via damage()");
 
     arena.damage(client1.sessionId, 1000);
+    await room.waitForNextTimestep(); // deaths land at the end of the step
     assert.strictEqual(player.hp, 0, "never below zero");
   });
 
@@ -201,6 +238,7 @@ describe("testing your Colyseus app", () => {
     assert.strictEqual(player.hp, MAX_HP - 40, "later hits are");
 
     arena.damage(client1.sessionId, 1000, fireball);
+    await room.waitForNextTimestep(); // deaths land at the end of the step
     assert.strictEqual(player.hp, 0);
     assert.deepStrictEqual([...player.effects], [], "death clears every effect");
   });
@@ -242,6 +280,7 @@ describe("testing your Colyseus app", () => {
       const client1 = await colyseus.connectTo(room);
       const player = room.state.players.get(client1.sessionId);
       (room as unknown as MyRoom).damage(client1.sessionId, MAX_HP * 5);
+      await room.waitForNextTimestep(); // deaths land at the end of the step
       assert.strictEqual(player.hp, 0, "clamped at zero");
 
       const { x, y } = player;
@@ -267,6 +306,7 @@ describe("testing your Colyseus app", () => {
       assert.strictEqual(player.hp, MAX_HP - 30, "alive players can't respawn to heal");
 
       arena.damage(client1.sessionId, MAX_HP);
+      await room.waitForNextTimestep(); // deaths land at the end of the step
       const deathSpot = { x: player.x, y: player.y };
       client1.send(CLIENT_MESSAGE.respawn);
       await room.waitForNextMessage();
@@ -310,6 +350,7 @@ describe("testing your Colyseus app", () => {
       const arena = room as unknown as MyRoom;
       Object.assign(room.state.players.get(ghost.sessionId), { x: 200, y: 200 });
       arena.damage(ghost.sessionId, MAX_HP);
+      await room.waitForNextTimestep(); // deaths land at the end of the step
 
       let ghostCharging = 0;
       ghost.onMessage(SERVER_MESSAGE.sunStrikeCharging, () => ghostCharging++);
@@ -840,6 +881,7 @@ describe("testing your Colyseus app", () => {
       Object.assign(player(beside), { x: 440, y: 200 });
       Object.assign(player(far), { x: 410 + PLAYER_HALF * 2 + FIREBALL.blastRadius + 20, y: 200 });
       (room as unknown as MyRoom).damage(ghost.sessionId, MAX_HP);
+      await room.waitForNextTimestep(); // deaths land at the end of the step
 
       const casts: FireballCast[] = [];
       caster.onMessage(SERVER_MESSAGE.fireballCast, (m: FireballCast) => casts.push(m));
@@ -1083,6 +1125,7 @@ describe("testing your Colyseus app", () => {
       Object.assign(player(behind), { x: 400, y: 380 });
       Object.assign(player(ghost), { x: 410, y: 230 });
       (room as unknown as MyRoom).damage(ghost.sessionId, MAX_HP);
+      await room.waitForNextTimestep(); // deaths land at the end of the step
 
       const input = caster.input<MoveInput>({ mode: "reliable" });
       input.data.yaw = 0;
@@ -1209,6 +1252,7 @@ describe("testing your Colyseus app", () => {
       Object.assign(room.state.players.get(ghost.sessionId), { x: 400, y: 300, yaw: 0 });
       Object.assign(room.state.players.get(target.sessionId), { x: 400, y: 200 });
       (room as unknown as MyRoom).damage(ghost.sessionId, MAX_HP);
+      await room.waitForNextTimestep(); // deaths land at the end of the step
 
       let ends = 0;
       ghost.onMessage(SERVER_MESSAGE.flameBreathEnd, () => ends++);
@@ -1321,14 +1365,121 @@ describe("testing your Colyseus app", () => {
     });
   });
 
+  describe("a killing blow", () => {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    type Sender = { send(type: string, message?: unknown): void };
+
+    /**
+     * Every skill whose hit moves or slows its victim, cast by a mage at
+     * (400, 300) facing -y on one 60 units straight ahead.
+     */
+    const killers: { skill: string; element: string; cast(caster: Sender): Promise<void> }[] = [
+      { skill: "Torrent: hurls", element: "water", cast: async (c) => { c.send(CLIENT_MESSAGE.torrent, { x: 400, y: 240 }); await sleep(TORRENT.delayMs + 300); } },
+      { skill: "Puff: blows away and pops up", element: "wind", cast: async (c) => { c.send(CLIENT_MESSAGE.puff); await sleep(200); } },
+      { skill: "Freezing Stream: freezes", element: "water", cast: async (c) => { c.send(CLIENT_MESSAGE.freezingStream, { yaw: 0, pitch: 0 }); await sleep(500); } },
+      { skill: "Rupture: stuns", element: "earth", cast: async (c) => { c.send(CLIENT_MESSAGE.rupture, { yaw: 0 }); await sleep(RUPTURE.windupMs + RUPTURE_TRAVEL_MS + 300); } },
+      { skill: "Water Whip's lash: slows", element: "water", cast: async (c) => { c.send(CLIENT_MESSAGE.waterWhip, { yaw: 0, pitch: 0 }); await sleep(200); } },
+      {
+        skill: "Water Whip's shard: slows", element: "water", cast: async (c) => {
+          // Two lashes cracked behind, at no one, and the third hit is the shard.
+          for (let i = 0; i < 2; i++) {
+            c.send(CLIENT_MESSAGE.waterWhip, { yaw: Math.PI, pitch: 0 });
+            await sleep(WATER_WHIP.cooldownMs + 100);
+          }
+          c.send(CLIENT_MESSAGE.waterWhip, { yaw: 0, pitch: 0 });
+          await sleep(WHIP_SHARD.lifetimeMs / 2);
+        },
+      },
+      { skill: "Twin Dragons: burns", element: "fire", cast: async (c) => { c.send(CLIENT_MESSAGE.twinDragons, { x: 400, y: 240 }); await sleep(1500); } },
+    ];
+
+    for (const { skill, element, cast } of killers) it(`never launches, pushes or slows the body — ${skill}`, async () => {
+      const room = await colyseus.createRoom<MyRoomState>("my_room", {});
+      const caster = await colyseus.connectTo(room, { element });
+      const victim = await colyseus.connectTo(room);
+      const body = room.state.players.get(victim.sessionId);
+      Object.assign(room.state.players.get(caster.sessionId), { x: 400, y: 300, yaw: 0 });
+      Object.assign(body, { x: 400, y: 240, hp: 1 });
+      const { z } = body;
+
+      // The body as the step that kills them leaves it, just before their death clears it.
+      const arena = room as unknown as { die(sessionId: string, player: Player, source?: DamageSource): void };
+      const die = arena.die.bind(arena);
+      let atDeath: { effects: string[]; dashTime: number; vz: number; flightZ: number } | undefined;
+      arena.die = (sessionId, player, source) => {
+        if (sessionId === victim.sessionId) {
+          atDeath = { effects: [...player.effects], dashTime: player.dashTime, vz: player.vz, flightZ: player.flightZ };
+        }
+        die(sessionId, player, source);
+      };
+
+      await cast(caster);
+      await room.waitForNextTimestep();
+
+      assert.strictEqual(body.hp, 0, "killed");
+      assert.deepStrictEqual(atDeath, { effects: [], dashTime: 0, vz: 0, flightZ: 0 }, "untouched by the blow");
+      assert.strictEqual(body.z, z, "still on the ground");
+    });
+  });
+
+  describe("killed, still acting until the step ends", () => {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    /**
+     * Every cast that puts something on its own caster (Stone Skin would too,
+     * but no kit has it): what everyone is told, and what must be on the
+     * caster for the cast to have landed.
+     */
+    const selfCasts: { skill: string; element: string; message: string; payload?: unknown; told: string; landed(body: Player): boolean }[] = [
+      { skill: "Puff's speed boost", element: "wind", message: CLIENT_MESSAGE.puff, told: SERVER_MESSAGE.puffCast, landed: (b) => b.effects.includes("speed_boost") },
+      { skill: "Skyfall's soaring", element: "wind", message: CLIENT_MESSAGE.skyfall, told: SERVER_MESSAGE.skyfallRise, landed: (b) => b.effects.includes("soaring") },
+      { skill: "Leap's dash", element: "wind", message: CLIENT_MESSAGE.leap, payload: { yaw: 0 }, told: SERVER_MESSAGE.leapCast, landed: (b) => b.dashTime > 0 },
+      {
+        skill: "Burrow's dig: no walking, no casting", element: "earth", message: CLIENT_MESSAGE.burrow, told: SERVER_MESSAGE.burrowCast,
+        landed: (b) => b.effects.includes("burrowing") && !canCast(b.effects) && moveLimits(b.effects).speedScale === 0,
+      },
+    ];
+
+    for (const { skill, element, message, payload, told, landed } of selfCasts) it(`a self cast lands in full, then death clears it — ${skill}`, async () => {
+      const room = await colyseus.createRoom<MyRoomState>("my_room", {});
+      const caster = await colyseus.connectTo(room, { element });
+      const watcher = await colyseus.connectTo(room);
+      const arena = room as unknown as MyRoom;
+      const body = room.state.players.get(caster.sessionId);
+      Object.assign(body, { x: 400, y: 300, yaw: 0 });
+      let casts = 0;
+      watcher.onMessage(told, () => casts++);
+
+      // No step runs between the killing blow and the cast: the cast falls in the dying window.
+      const steps = arena as unknown as { step(ctx: unknown): void };
+      const step = steps.step;
+      steps.step = () => {};
+      arena.damage(caster.sessionId, MAX_HP);
+      assert.strictEqual(body.hp, 0, "the body is dead at once");
+      assert.strictEqual(arena.canAct(caster.sessionId), true, "but they act until the step ends");
+
+      caster.send(message, payload);
+      await sleep(100);
+      assert.strictEqual(casts, 1, "everyone sees the cast");
+      assert.ok(landed(body), "and it lands on the caster");
+
+      steps.step = step;
+      await room.waitForNextTimestep();
+      assert.strictEqual(arena.canAct(caster.sessionId), false, "dead once the step ends");
+      assert.deepStrictEqual([...body.effects], [], "their death clears it");
+      assert.strictEqual(body.dashTime, 0);
+    });
+  });
+
   describe("Duel", () => {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-    /** A duel room with both seats taken. */
-    async function duel(roundsToWin = 2) {
+    /** A duel room with both seats taken: A, then B, unless `bJoinsFirst`. */
+    async function duel(roundsToWin = 2, { bJoinsFirst = false, element = "fire" } = {}) {
       const room = await colyseus.createRoom<MyRoomState>("my_room", { mode: "duel", settings: { roundsToWin } });
-      const a = await colyseus.connectTo(room, { nickname: "A" });
-      const b = await colyseus.connectTo(room, { nickname: "B" });
+      const first = await colyseus.connectTo(room, { nickname: bJoinsFirst ? "B" : "A", element });
+      const second = await colyseus.connectTo(room, { nickname: bJoinsFirst ? "A" : "B", element });
+      const [a, b] = bJoinsFirst ? [second, first] : [first, second];
       const arena = room as unknown as MyRoom;
       const pa = room.state.players.get(a.sessionId);
       const pb = room.state.players.get(b.sessionId);
@@ -1436,6 +1587,45 @@ describe("testing your Colyseus app", () => {
       assert.deepStrictEqual([pa.wins, pb.wins], [0, 0]);
     });
 
+    for (const bJoinsFirst of [false, true]) it(`two mages breathing each other to death on the same step is a draw (${bJoinsFirst ? "B" : "A"} joined first)`, async () => {
+      const { room, a, b, pa, pb, start } = await duel(2, { bJoinsFirst });
+      await start();
+      await breatheEachOtherDown(room, a, b);
+
+      assert.deepStrictEqual([pa.hp, pb.hp], [0, 0], "both burned down");
+      assert.strictEqual(room.state.match.phase, "roundOver");
+      assert.strictEqual(room.state.match.roundWinnerId, "", "nobody takes the round");
+      assert.deepStrictEqual([pa.wins, pb.wins], [0, 0]);
+    });
+
+    for (const bJoinsFirst of [false, true]) it(`two mages whipping each other to death between the same two steps is a draw (${bJoinsFirst ? "B" : "A"} joined first)`, async () => {
+      const { room, arena, a, b, pa, pb, start } = await duel(2, { bJoinsFirst, element: "water" });
+      await start();
+
+      // Face to face well inside a lash's reach, one lash from death each.
+      Object.assign(pa, { x: 400, y: 340, yaw: 0 });
+      Object.assign(pb, { x: 400, y: 260, yaw: Math.PI });
+      arena.damage(a.sessionId, MAX_HP - WATER_WHIP.damage);
+      arena.damage(b.sessionId, MAX_HP - WATER_WHIP.damage);
+
+      // No step runs while both lashes arrive, so they land between the same two.
+      const steps = arena as unknown as { step(ctx: unknown): void };
+      const step = steps.step;
+      steps.step = () => {};
+      let casts = 0;
+      a.onMessage(SERVER_MESSAGE.waterWhipCast, () => casts++);
+      a.send(CLIENT_MESSAGE.waterWhip, { yaw: 0, pitch: 0 });
+      b.send(CLIENT_MESSAGE.waterWhip, { yaw: Math.PI, pitch: 0 });
+      await sleep(100);
+      steps.step = step;
+      while (room.state.match.phase === "fighting") { await room.waitForNextTimestep(); }
+
+      assert.strictEqual(casts, 2, "both lashes were cracked");
+      assert.deepStrictEqual([pa.hp, pb.hp], [0, 0], "both lashed down");
+      assert.strictEqual(room.state.match.roundWinnerId, "", "nobody takes the round");
+      assert.deepStrictEqual([pa.wins, pb.wins], [0, 0]);
+    });
+
     it("the first to win enough rounds wins the match, then both must ready up again", async () => {
       const { room, arena, a, b, pa, pb, skipPhase, start } = await duel(2);
       await start();
@@ -1477,11 +1667,12 @@ describe("testing your Colyseus app", () => {
   describe("Battle royale", () => {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-    /** A battle royale room with three seated out of `maxPlayers`. */
-    async function battleRoyale(roundsToWin = 2, maxPlayers = 4) {
+    /** A battle royale room with three seated out of `maxPlayers`: A, B, then C — B before A if `bJoinsFirst`. */
+    async function battleRoyale(roundsToWin = 2, maxPlayers = 4, { bJoinsFirst = false } = {}) {
       const room = await colyseus.createRoom<MyRoomState>("my_room", { mode: "battleRoyale", settings: { roundsToWin, maxPlayers } });
-      const a = await colyseus.connectTo(room, { nickname: "A" });
-      const b = await colyseus.connectTo(room, { nickname: "B" });
+      const first = await colyseus.connectTo(room, { nickname: bJoinsFirst ? "B" : "A" });
+      const second = await colyseus.connectTo(room, { nickname: bJoinsFirst ? "A" : "B" });
+      const [a, b] = bJoinsFirst ? [second, first] : [first, second];
       const c = await colyseus.connectTo(room, { nickname: "C" });
       const arena = room as unknown as MyRoom;
       const [pa, pb, pc] = [a, b, c].map((client) => room.state.players.get(client.sessionId)!);
@@ -1547,6 +1738,22 @@ describe("testing your Colyseus app", () => {
       await skipPhase();
       assert.strictEqual(room.state.match.round, 2);
       assert.deepStrictEqual([pa.hp, pb.hp, pc.hp], [MAX_HP, MAX_HP, MAX_HP]);
+    });
+
+    for (const bJoinsFirst of [false, true]) it(`the last two breathing each other to death on the same step is a draw (${bJoinsFirst ? "B" : "A"} joined first)`, async () => {
+      const { room, arena, a, b, c, pa, pb, pc, start } = await battleRoyale(2, 4, { bJoinsFirst });
+      await start();
+
+      arena.damage(c.sessionId, MAX_HP);
+      await room.waitForNextTimestep();
+      assert.strictEqual(room.state.match.phase, "fighting", "down to the last two");
+
+      await breatheEachOtherDown(room, a, b);
+
+      assert.deepStrictEqual([pa.hp, pb.hp], [0, 0], "both burned down");
+      assert.strictEqual(room.state.match.phase, "roundOver");
+      assert.strictEqual(room.state.match.roundWinnerId, "", "nobody takes the round");
+      assert.deepStrictEqual([pa.wins, pb.wins, pc.wins], [0, 0, 0]);
     });
 
     it("the first to win enough rounds wins the match, then everyone must ready up again", async () => {

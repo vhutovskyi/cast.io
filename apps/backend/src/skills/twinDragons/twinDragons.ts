@@ -40,7 +40,7 @@ export class TwinDragonsSkill {
    */
   cast(client: Client, message: unknown) {
     const caster = this.room.state.players.get(client.sessionId);
-    if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "twin_dragons")) { return; }
+    if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "twin_dragons")) { return; }
 
     const { x, y } = (message ?? {}) as Partial<TwinDragonsCast>;
     if (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) { return; }

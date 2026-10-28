@@ -22,7 +22,7 @@ export class StatusEffects {
   private active = new Map<string, Map<EffectId, ActiveEffect>>();
 
   constructor(
-    private readonly room: Pick<SkillRoom, "state" | "clock" | "damage">,
+    private readonly room: Pick<SkillRoom, "state" | "clock" | "damage" | "canAct">,
     private readonly defs: Readonly<Record<EffectId, EffectDef>> = EFFECTS,
     private readonly abilityEffects: Readonly<Partial<Record<KillAbility, readonly EffectId[]>>> = ABILITY_EFFECTS,
   ) {
@@ -41,12 +41,16 @@ export class StatusEffects {
    * Puts an effect on a living player for `durationMs` (the effect's own by
    * default), or restarts its timer if they already have it — never cutting
    * what is left short (the damage beat keeps going). False if there is no
-   * one to apply it to.
+   * one to apply it to. A player killed this step still acts until it ends
+   * (`canAct`): what they cast on themselves lands like the rest of the cast,
+   * and their death clears it with everything else. Nothing anyone else
+   * applies lands on a body at 0 health.
    */
   apply(sessionId: string, id: EffectId, source?: DamageSource, durationMs?: number): boolean {
     this.assertDefined(id);
     const player = this.room.state.players.get(sessionId);
-    if (!player || player.hp <= 0) { return false; }
+    const onSelf = source?.id === sessionId;
+    if (!player || !(player.hp > 0 || (onSelf && this.room.canAct(sessionId)))) { return false; }
 
     const def = this.defs[id];
     const now = this.room.clock.currentTime;

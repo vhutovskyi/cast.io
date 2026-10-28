@@ -42,6 +42,7 @@ function fakeRoom(seenThen: SeenAt) {
     addGroundZone: () => 0,
     seenBy: () => LIVE,
     lagOf: () => view.lag,
+    canAct: (sessionId: string) => (state.players.get(sessionId)?.hp ?? 0) > 0,
     seenAgo: (lag) => lag > 0 ? seenThen : LIVE,
   };
   const skill = new FireballSkill(room);

@@ -27,7 +27,7 @@ export class FreezingStreamSkill {
      */
     cast(client, message) {
         const caster = this.room.state.players.get(client.sessionId);
-        if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "freezing_stream")) {
+        if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "freezing_stream")) {
             return;
         }
         const { yaw, pitch } = (message ?? {});

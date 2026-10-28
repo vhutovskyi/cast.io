@@ -42,6 +42,7 @@ function fakeRoom() {
     addGroundZone() { return 0; },
     seenBy: () => LIVE,
     lagOf: () => 0,
+    canAct: (sessionId: string) => (state.players.get(sessionId)?.hp ?? 0) > 0,
     seenAgo: () => LIVE,
   };
   const attacks: { attackerId: string; at: { x: number; y: number; z: number }; aim: WaterWhipAim; source: DamageSource; ignore?: ReadonlySet<string>; damage?: number }[] = [];

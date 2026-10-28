@@ -45,7 +45,7 @@ export class BouldersSkill implements ServerSkill {
   /** Raises a boulder just ahead of the caster, if they may: not too soon, not too many. */
   raise(client: Client) {
     const caster = this.room.state.players.get(client.sessionId);
-    if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "boulders")) { return; }
+    if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "boulders")) { return; }
 
     const now = this.room.clock.currentTime;
     if (now < (this.readyAt.get(client.sessionId) ?? 0)) { return; }
@@ -67,7 +67,7 @@ export class BouldersSkill implements ServerSkill {
    */
   kick(client: Client, message: unknown) {
     const caster = this.room.state.players.get(client.sessionId);
-    if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "boulders")) { return; }
+    if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "boulders")) { return; }
 
     const { yaw } = (message ?? {}) as Partial<BoulderKick>;
     if (typeof yaw !== "number" || !Number.isFinite(yaw)) { return; }

@@ -67,7 +67,7 @@ export class LeapSkill implements ServerSkill {
 
   private start(sessionId: string, yaw: number, fromInput: boolean) {
     const caster = this.room.state.players.get(sessionId);
-    if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "leap")) { return; }
+    if (!caster || !this.room.canAct(sessionId) || !hasSkill(caster.element, "leap")) { return; }
 
     const now = this.room.clock.currentTime;
     if (now < (this.readyAt.get(sessionId) ?? 0) - (fromInput ? INPUT_COOLDOWN_SLACK_MS : 0)) { return; }
@@ -95,7 +95,7 @@ export class LeapSkill implements ServerSkill {
   step() {
     for (const [casterId, leap] of this.leaping) {
       const caster = this.room.state.players.get(casterId);
-      if (!caster || caster.hp <= 0) {
+      if (!caster || !this.room.canAct(casterId)) {
         this.leaping.delete(casterId);
         continue;
       }

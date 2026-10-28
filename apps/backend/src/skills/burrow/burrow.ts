@@ -62,7 +62,7 @@ export class BurrowSkill implements ServerSkill {
 
   private dig(sessionId: string, fromInput: boolean) {
     const caster = this.room.state.players.get(sessionId);
-    if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "burrow")) { return; }
+    if (!caster || !this.room.canAct(sessionId) || !hasSkill(caster.element, "burrow")) { return; }
     if (this.digs.has(sessionId)) { return; }
     // On the ground the movement step leaves exactly 0 here; in the air it never is.
     if (caster.vz !== 0 || caster.flightZ > 0) { return; }
@@ -101,7 +101,7 @@ export class BurrowSkill implements ServerSkill {
   private burst(sessionId: string, fromInput: boolean) {
     const dig = this.digs.get(sessionId);
     const caster = this.room.state.players.get(sessionId);
-    if (!dig || !dig.under || !caster || caster.hp <= 0) { return; }
+    if (!dig || !dig.under || !caster || !this.room.canAct(sessionId)) { return; }
 
     this.digs.delete(sessionId);
     this.room.removeEffect(sessionId, "burrowed");
@@ -130,7 +130,7 @@ export class BurrowSkill implements ServerSkill {
   /** After each of the caster's steps: counts down the phase, and ends it after its last step. */
   afterInput(sessionId: string, player: Player) {
     const dig = this.digs.get(sessionId);
-    if (!dig || player.hp <= 0) { return; }
+    if (!dig || !this.room.canAct(sessionId)) { return; }
     if (--dig.stepsLeft <= 0) { this.nextPhase(sessionId, dig, player); }
   }
 
@@ -143,7 +143,7 @@ export class BurrowSkill implements ServerSkill {
     const now = this.room.clock.currentTime;
     for (const [casterId, dig] of this.digs) {
       const caster = this.room.state.players.get(casterId);
-      if (!caster || caster.hp <= 0) {
+      if (!caster || !this.room.canAct(casterId)) {
         this.digs.delete(casterId);
         continue;
       }

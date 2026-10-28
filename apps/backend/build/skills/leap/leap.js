@@ -48,7 +48,7 @@ export class LeapSkill {
     }
     start(sessionId, yaw, fromInput) {
         const caster = this.room.state.players.get(sessionId);
-        if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "leap")) {
+        if (!caster || !this.room.canAct(sessionId) || !hasSkill(caster.element, "leap")) {
             return;
         }
         const now = this.room.clock.currentTime;
@@ -76,7 +76,7 @@ export class LeapSkill {
     step() {
         for (const [casterId, leap] of this.leaping) {
             const caster = this.room.state.players.get(casterId);
-            if (!caster || caster.hp <= 0) {
+            if (!caster || !this.room.canAct(casterId)) {
                 this.leaping.delete(casterId);
                 continue;
             }

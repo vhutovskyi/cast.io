@@ -21,7 +21,7 @@ export class PuffSkill implements ServerSkill {
    */
   cast(client: Client, _message?: unknown) {
     const caster = this.room.state.players.get(client.sessionId);
-    if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "puff")) { return; }
+    if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "puff")) { return; }
 
     const now = this.room.clock.currentTime;
     if (now < (this.readyAt.get(client.sessionId) ?? 0)) { return; }

@@ -46,6 +46,7 @@ function fakeRoom() {
     addGroundZone: () => 0,
     seenBy: () => lag.seenAgo(lag.ms),
     lagOf: () => lag.ms,
+    canAct: (sessionId: string) => (state.players.get(sessionId)?.hp ?? 0) > 0,
     seenAgo: (lagMs) => lag.seenAgo(lagMs),
   };
   const skill = new WindPoleSkill(room);

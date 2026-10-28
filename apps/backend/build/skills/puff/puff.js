@@ -17,7 +17,7 @@ export class PuffSkill {
      */
     cast(client, _message) {
         const caster = this.room.state.players.get(client.sessionId);
-        if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "puff")) {
+        if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "puff")) {
             return;
         }
         const now = this.room.clock.currentTime;

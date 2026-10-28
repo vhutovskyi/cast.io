@@ -44,6 +44,7 @@ function fakeRoom() {
     addGroundZone: () => 0,
     seenBy: () => LIVE,
     lagOf: () => view.lag,
+    canAct: (sessionId: string) => (state.players.get(sessionId)?.hp ?? 0) > 0,
     seenAgo: (lagMs) => {
       view.asked.push(lagMs);
       return lagMs > 0 ? view.rewound : LIVE;

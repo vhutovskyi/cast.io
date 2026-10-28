@@ -43,7 +43,7 @@ export class BurrowSkill {
     }
     dig(sessionId, fromInput) {
         const caster = this.room.state.players.get(sessionId);
-        if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "burrow")) {
+        if (!caster || !this.room.canAct(sessionId) || !hasSkill(caster.element, "burrow")) {
             return;
         }
         if (this.digs.has(sessionId)) {
@@ -87,7 +87,7 @@ export class BurrowSkill {
     burst(sessionId, fromInput) {
         const dig = this.digs.get(sessionId);
         const caster = this.room.state.players.get(sessionId);
-        if (!dig || !dig.under || !caster || caster.hp <= 0) {
+        if (!dig || !dig.under || !caster || !this.room.canAct(sessionId)) {
             return;
         }
         this.digs.delete(sessionId);
@@ -120,7 +120,7 @@ export class BurrowSkill {
     /** After each of the caster's steps: counts down the phase, and ends it after its last step. */
     afterInput(sessionId, player) {
         const dig = this.digs.get(sessionId);
-        if (!dig || player.hp <= 0) {
+        if (!dig || !this.room.canAct(sessionId)) {
             return;
         }
         if (--dig.stepsLeft <= 0) {
@@ -136,7 +136,7 @@ export class BurrowSkill {
         const now = this.room.clock.currentTime;
         for (const [casterId, dig] of this.digs) {
             const caster = this.room.state.players.get(casterId);
-            if (!caster || caster.hp <= 0) {
+            if (!caster || !this.room.canAct(casterId)) {
                 this.digs.delete(casterId);
                 continue;
             }

@@ -19,7 +19,7 @@ export class SunStrikeSkill {
      */
     cast(client, message) {
         const caster = this.room.state.players.get(client.sessionId);
-        if (!caster || caster.hp <= 0 || !hasSkill(caster.element, "sun_strike")) {
+        if (!caster || !this.room.canAct(client.sessionId) || !hasSkill(caster.element, "sun_strike")) {
             return;
         }
         const { x, y } = (message ?? {});
