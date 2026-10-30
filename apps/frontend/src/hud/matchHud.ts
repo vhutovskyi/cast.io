@@ -1,7 +1,9 @@
 import type { MatchPhase } from "@ligma/backend/rooms/schema/MyRoomState";
 import { BATTLE_ROYALE } from "@ligma/backend/shared/gameModes";
+import type { RankedResult } from "@ligma/backend/shared/ranked";
 import { isWaterClone } from "@ligma/backend/skills/waterClone/waterCloneConfig";
 import type { ArenaRoom } from "../net/arenaRoom";
+import { formatRating } from "../ui/ranked";
 
 /** The duel / battle royale banner, top centre. */
 export interface MatchHudUi {
@@ -36,6 +38,8 @@ interface Shown {
  */
 export class MatchHud {
   private shown = "";
+  /** Ranked: how our match went for our rating, once the server has said. */
+  private rankedResult: RankedResult | null = null;
 
   constructor(
     private readonly room: ArenaRoom,
@@ -66,8 +70,19 @@ export class MatchHud {
     this.readyButton.classList.toggle("is-ready", next.ready === true);
   }
 
+  /** Ranked: the server's word on our match, shown with its result. */
+  showRankedResult(result: RankedResult) {
+    this.rankedResult = result;
+  }
+
+  /** Ranked: our match has been rated. */
+  get hasRankedResult() {
+    return this.rankedResult !== null;
+  }
+
   hide() {
     this.shown = "";
+    this.rankedResult = null;
     this.ui.root.hidden = true;
     this.ui.result.hidden = true;
     this.ui.overlayTitle.textContent = "Click to play";
@@ -85,7 +100,7 @@ export class MatchHud {
     const nameOf = (id: string) => id === this.room.sessionId ? "You" : id === opponentId ? opponent!.name : "";
 
     const shown: Shown = {
-      score: `${match.round > 0 ? `Round ${match.round} · ` : ""}First to ${match.roundsToWin} · You ${self.wins} – ${opponent?.wins ?? 0} ${opponent?.name ?? "…"}`,
+      score: `${match.ranked ? "Ranked · " : ""}${match.round > 0 ? `Round ${match.round} · ` : ""}First to ${match.roundsToWin} · You ${self.wins} – ${opponent?.wins ?? 0} ${opponent?.name ?? "…"}`,
       headline: "",
       hint: "",
       ready: null,
@@ -99,6 +114,18 @@ export class MatchHud {
         shown.headline = !match.matchWinnerId ? (opponent ? "Warm-up — hits don't count" : "Waiting for an opponent")
           : winner === "You" ? "You win the match!"
           : winner ? `${winner} wins the match` : "Match over";
+        if (match.ranked) {
+          // One match, rated: the result and what it did to our rating stay up until the room closes.
+          const result = this.rankedResult;
+          if (winner) { shown.result = winner === "You" ? "win" : "lose"; }
+          if (!match.matchWinnerId && !opponent) { shown.headline = "Waiting for your opponent to join"; }
+          if (result?.forfeit && result.won) { shown.headline = "Your opponent left — you win the match!"; }
+          if (result) {
+            const delta = Math.round(result.ratingAfter) - Math.round(result.ratingBefore);
+            shown.hint = `Rating ${Math.round(result.ratingBefore)} → ${formatRating(result.ratingAfter, result.deviation)} (${delta >= 0 ? "+" : ""}${delta})`;
+          }
+          break;
+        }
         if (match.autoStart) {
           // Quick Play: no Ready — the result stays up until the next match starts on its own.
           if (winner) { shown.result = winner === "You" ? "win" : "lose"; }
@@ -120,6 +147,11 @@ export class MatchHud {
           : winner === "You" ? `You take round ${match.round}` : `${winner} takes round ${match.round}`;
         break;
       }
+    }
+    // Ranked: the opponent dropped, the fight is paused while their seat is held.
+    if (match.awaitingId && match.awaitingId !== this.room.sessionId) {
+      shown.headline = `${players.get(match.awaitingId)?.name ?? "Your opponent"} disconnected — waiting ${match.awaitingSeconds}s for them`;
+      shown.hint = "The fight is paused: hits don't count";
     }
     return shown;
   }

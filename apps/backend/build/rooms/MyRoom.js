@@ -5,7 +5,8 @@ import { TICK_RATE, ROOM_NAME_MAX, NICKNAME_MAX, MAX_HP } from "../shared/consta
 import { CLIENT_MESSAGE, SERVER_MESSAGE } from "../shared/messages.js";
 import { INPUT_ACTION, MAX_INPUT_ACTION } from "../shared/actions.js";
 import { DEFAULT_ELEMENT, isPlayableElement } from "../shared/elements.js";
-import { maxClientsOf, parseGameMode } from "../shared/gameModes.js";
+import { DUEL, maxClientsOf, parseGameMode } from "../shared/gameModes.js";
+import { RANKED } from "../shared/ranked.js";
 import { MAP_TERRAIN, parseMap } from "../shared/maps.js";
 import { FLAT } from "../shared/terrain.js";
 import { LIVE } from "../skills/skillRoom.js";
@@ -35,6 +36,8 @@ import { InputPacer } from "./inputPacer.js";
 import { FreeForAllMode } from "../modes/freeForAll.js";
 import { DuelMode } from "../modes/duel.js";
 import { BattleRoyaleMode } from "../modes/battleRoyale.js";
+import { ranked } from "../ranked/ranked.js";
+import { RankedMatch } from "../ranked/rankedMatch.js";
 /** Damage dealt by the dev-only `debug_damage` message. */
 const DEBUG_DAMAGE = 10;
 /**
@@ -44,6 +47,8 @@ const DEBUG_DAMAGE = 10;
  * wall on their own screen is spared.
  */
 const MAX_REWIND_MS = 400;
+/** How long a dropped player's seat is held outside ranked, in seconds. */
+const RECONNECT_GRACE_S = 30;
 /**
  * Room names and nicknames are player-typed text broadcast to other players:
  * keep printable characters only, collapse whitespace, cap the length.
@@ -160,6 +165,9 @@ export class MyRoom extends Room {
         }
     }
     onCreate(options) {
+        if (options?.ranked !== undefined) {
+            return this.createRanked(options.ranked);
+        }
         const quickPlay = options?.quickPlay === true;
         // The lobby only offers real modes, so anything else is a modified client.
         // Quick Play rooms all run the defaults: a player can't size one by creating it.
@@ -177,6 +185,52 @@ export class MyRoom extends Room {
         this.terrain = MAP_TERRAIN[map];
         // Replaces the matchmaker's own metadata (0.18): `mode` and `quickPlay` must be in here for `filterBy`.
         this.setMetadata({ name: sanitizeText(options?.name, ROOM_NAME_MAX) || `Arena ${this.roomId}`, map, quickPlay, ...config });
+        this.setUp();
+        const modeRoom = this.modeRoom();
+        switch (config.mode) {
+            case "ffa":
+                this.mode = new FreeForAllMode(modeRoom);
+                break;
+            case "duel":
+                this.mode = new DuelMode(modeRoom, config.settings, { autoStart: quickPlay });
+                break;
+            case "battleRoyale":
+                this.mode = new BattleRoyaleMode(modeRoom, config.settings, quickPlay);
+                break;
+        }
+    }
+    /**
+     * A ranked duel, made by the ranked queue for the match it issued `matchId`
+     * for: default duel settings and map, unlisted, and locked so nobody but
+     * the two seats the queue reserves gets in.
+     */
+    async createRanked(matchId) {
+        const ticket = ranked.claim(matchId);
+        if (!ticket) {
+            throw new ServerError(403, "Ranked matches are made by the ranked queue.");
+        }
+        const config = parseGameMode("duel", undefined);
+        const map = parseMap(undefined);
+        this.maxClients = DUEL.maxClients;
+        // Held just past the join deadline, so a no-show is judged by `RankedMatch` rather than expiring
+        // quietly. Colyseus keeps a room open while a seat is reserved: a called-off match's room lingers
+        // until then, telling a latecomer it was called off.
+        this.seatReservationTimeout = RANKED.joinTimeoutMs / 1000 + 1;
+        this.state.match.map = map;
+        this.terrain = MAP_TERRAIN[map];
+        this.setMetadata({ name: "Ranked duel", map, quickPlay: false, ...config });
+        await this.setPrivate(true);
+        await this.lock();
+        this.setUp();
+        const duel = new DuelMode(this.modeRoom(), config.settings, {
+            autoStart: true,
+            ranked: { onMatchEnd: (winnerId) => this.ranked.finished(winnerId) },
+        });
+        this.mode = duel;
+        this.ranked = new RankedMatch(this.rankedRoom(duel), ticket);
+    }
+    /** What every room runs, whatever its mode: the simulation, lag compensation, effects and skills. */
+    setUp() {
         this.setFixedTimestep((ctx) => this.step(ctx), TICK_RATE);
         // Recorded with every patch, so it holds exactly the positions clients were sent.
         this.rewind = this.allowRewindState({ maxRewindMs: MAX_REWIND_MS });
@@ -216,18 +270,15 @@ export class MyRoom extends Room {
             this.stones, this.stoneSkin, this.boulders, this.earthWall, this.burrow, this.rupture,
             this.windPole, this.leap, this.puff, this.skyfall,
         ];
-        const modeRoom = this.modeRoom();
-        switch (config.mode) {
-            case "ffa":
-                this.mode = new FreeForAllMode(modeRoom);
-                break;
-            case "duel":
-                this.mode = new DuelMode(modeRoom, config.settings, quickPlay);
-                break;
-            case "battleRoyale":
-                this.mode = new BattleRoyaleMode(modeRoom, config.settings, quickPlay);
-                break;
-        }
+    }
+    /** The narrow view of this room a ranked match works through. */
+    rankedRoom(duel) {
+        return {
+            clock: this.clock,
+            send: (sessionId, type, message) => this.clients.getById(sessionId)?.send(type, message),
+            forfeit: (winnerSessionId) => duel.forfeit(winnerSessionId),
+            close: (code) => { this.disconnect(code).catch(() => { }); },
+        };
     }
     /** The narrow view of this room the game mode works through. */
     modeRoom() {
@@ -308,15 +359,17 @@ export class MyRoom extends Room {
         return player !== undefined && isUntargetable(player.effects);
     }
     onJoin(client, options) {
+        // Ranked: the seat the queue reserved, with the account's name and the element given there.
+        const seat = this.ranked?.admit(options);
         // The lobby only offers playable elements, so anything else is a modified
         // client: refuse the seat rather than guess.
-        const element = options?.element ?? DEFAULT_ELEMENT;
+        const element = seat?.element ?? options?.element ?? DEFAULT_ELEMENT;
         if (!isPlayableElement(element)) {
             throw new ServerError(400, "That element can't be played yet.");
         }
         console.log(client.sessionId, "joined!");
         const player = new Player({
-            name: sanitizeText(options?.nickname, NICKNAME_MAX) || `Mage ${client.sessionId.slice(0, 4)}`,
+            name: seat ? seat.name : sanitizeText(options?.nickname, NICKNAME_MAX) || `Mage ${client.sessionId.slice(0, 4)}`,
             hp: MAX_HP,
             element,
             x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, yaw: 0, dashVx: 0, dashVy: 0, dashTime: 0, flightZ: 0, breathing: false, ready: false, wins: 0,
@@ -325,6 +378,9 @@ export class MyRoom extends Room {
         });
         this.mode.join(client.sessionId, player);
         this.state.players.set(client.sessionId, player);
+        if (seat) {
+            this.ranked.joined(client.sessionId, seat);
+        }
     }
     onLeave(client, code) {
         console.log(client.sessionId, "left!", code);
@@ -335,11 +391,24 @@ export class MyRoom extends Room {
         }
         this.effects.clear(client.sessionId);
         this.pacer.remove(client.sessionId);
+        // Before the mode: leaving a ranked match before it starts is a dodge, after, a forfeit.
+        this.ranked?.left(client.sessionId);
         // Last: a duel's forfeit resets the arena for whoever is still here.
         this.mode.leave(client.sessionId);
     }
     onDispose() {
         console.log("room", this.roomId, "disposing...");
+        this.ranked?.dispose();
+    }
+    /**
+     * The server is shutting down (a deploy): Colyseus waits for every room to
+     * close. A ranked match under way is played out rather than voided (up to
+     * `RANKED.shutdownDrainMs`); every other room closes now, the default.
+     */
+    onBeforeShutdown() {
+        if (!this.ranked?.drain()) {
+            super.onBeforeShutdown();
+        }
     }
     /**
      * The skill pressed in one of `sessionId`'s inputs (`MoveInput.act`), if
@@ -422,13 +491,22 @@ export class MyRoom extends Room {
      * same session, so the player keeps their entity and their place in the room.
      */
     onDrop(client, code) {
+        // Ranked: what's left of their disconnect budget, the fight paused meanwhile;
+        // none left, and they're gone (`onLeave` follows): a forfeit.
+        const graceS = this.ranked ? this.ranked.dropped(client.sessionId) : RECONNECT_GRACE_S;
+        if (graceS <= 0) {
+            return;
+        }
+        this.mode.drop?.(client.sessionId, graceS * 1000);
         // Deliberately not awaited: the framework routes the outcome to onReconnect()
         // or onLeave() by itself. The catch is only here because the promise also
         // rejects when the room is already disposing (server shutdown), which would
         // otherwise surface as an unhandled rejection.
-        this.allowReconnection(client, 30).catch(() => { });
+        this.allowReconnection(client, graceS).catch(() => { });
     }
     onReconnect(client) {
         console.log(client.sessionId, "reconnected!");
+        this.ranked?.reconnected(client.sessionId);
+        this.mode.reconnect?.(client.sessionId);
     }
 }

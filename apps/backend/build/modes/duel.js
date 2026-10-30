@@ -11,24 +11,30 @@ import { isWaterClone } from "../skills/waterClone/waterCloneConfig.js";
  * mid-match forfeits it.
  */
 export class DuelMode {
-    constructor(room, settings, autoStart = false) {
+    constructor(room, settings, { autoStart = false, ranked } = {}) {
         this.room = room;
-        this.autoStart = autoStart;
         /** Which spawn each seated player starts rounds at. */
         this.sides = new Map();
         /** Room-clock time (ms) the current timed phase ends. */
         this.phaseEndsAt = 0;
+        /** Ranked: the one match has been decided; no other starts. */
+        this.over = false;
+        /** Ranked: dropped players being waited for, by session id, with the room-clock time (ms) their seat is held until. */
+        this.awaiting = new Map();
+        this.autoStart = autoStart;
+        this.ranked = ranked;
         const { match } = room.state;
         match.mode = "duel";
         match.roundsToWin = settings.roundsToWin;
         match.autoStart = autoStart;
+        match.ranked = ranked !== undefined;
         this.setPhase("waiting");
     }
     get phase() {
         return this.room.state.match.phase;
     }
     get canDamage() {
-        return this.phase === "fighting";
+        return this.phase === "fighting" && this.awaiting.size === 0;
     }
     join(sessionId, player) {
         // Whichever spawn is free — the other player may have left and been replaced.
@@ -38,7 +44,10 @@ export class DuelMode {
     }
     leave(sessionId) {
         this.sides.delete(sessionId);
-        if (this.phase === "waiting") {
+        this.awaiting.delete(sessionId);
+        this.showAwaiting();
+        // Ranked: the ranked match decides whether this forfeits, and to whom (`forfeit`).
+        if (this.phase === "waiting" || this.ranked) {
             return;
         }
         const [remaining] = this.seated().map(([id]) => id);
@@ -48,6 +57,25 @@ export class DuelMode {
     died() { }
     /** Nobody respawns in a duel: the next round brings everyone back. */
     respawn() { }
+    /** Ranked: pause the fight until they're back. Elsewhere a dropped player just stands there. */
+    drop(sessionId, graceMs) {
+        if (!this.ranked || this.over) {
+            return;
+        }
+        this.awaiting.set(sessionId, this.room.clock.currentTime + graceMs);
+        this.showAwaiting();
+    }
+    reconnect(sessionId) {
+        this.awaiting.delete(sessionId);
+        this.showAwaiting();
+    }
+    /** Ranked: `winnerId` wins the match now, the other having left — even before the first round has begun. */
+    forfeit(winnerId) {
+        if (!this.ranked || this.over) {
+            return;
+        }
+        this.endMatch(winnerId);
+    }
     /** Toggles; once every seat is filled and ready, the match starts. Unused with `autoStart`. */
     ready(sessionId) {
         const player = this.room.state.players.get(sessionId);
@@ -63,10 +91,14 @@ export class DuelMode {
     step() {
         const now = this.room.clock.currentTime;
         const { match } = this.room.state;
+        if (this.awaiting.size > 0) {
+            this.showAwaiting();
+        }
         switch (this.phase) {
             case "waiting":
                 // Quick Play: no Ready — once the last result has been up long enough, fight whoever is here.
-                if (!this.autoStart || now < this.phaseEndsAt) {
+                // Ranked: only ever the one match.
+                if (!this.autoStart || this.over || now < this.phaseEndsAt) {
                     break;
                 }
                 if (this.seated().length === DUEL.maxClients) {
@@ -131,6 +163,19 @@ export class DuelMode {
         }
         this.resetArena();
         this.setPhase("waiting", this.autoStart ? QUICK_PLAY.matchOverMs : 0);
+        if (this.ranked) {
+            this.over = true;
+            this.awaiting.clear();
+            this.showAwaiting();
+            this.ranked.onMatchEnd(winnerId);
+        }
+    }
+    /** The HUD's "waiting for X to reconnect (12s)": the first of those being waited for. */
+    showAwaiting() {
+        const { match } = this.room.state;
+        const [sessionId, heldUntil] = this.awaiting.entries().next().value ?? ["", 0];
+        match.awaitingId = sessionId;
+        match.awaitingSeconds = sessionId ? Math.ceil(Math.max(0, heldUntil - this.room.clock.currentTime) / 1000) : 0;
     }
     resetArena() {
         this.room.resetArena();

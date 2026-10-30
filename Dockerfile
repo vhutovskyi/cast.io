@@ -18,6 +18,7 @@ COPY apps/frontend/package.json apps/frontend/
 RUN npm ci --omit=dev -w apps/backend && npm cache clean --force
 COPY --from=build /app/apps/backend/build apps/backend/build
 COPY --from=build /app/apps/frontend/dist apps/frontend/dist
-USER node
+COPY apps/backend/docker-entrypoint.mjs apps/backend/
 EXPOSE 2567
-CMD ["node", "apps/backend/build/index.js"]
+# Starts as root to hand the data volume to `node`, then runs the server as `node` (see the file).
+CMD ["node", "apps/backend/docker-entrypoint.mjs"]

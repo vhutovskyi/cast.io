@@ -30,6 +30,8 @@ export interface LobbyHandlers {
   onPlay(mode: GameModeId): void;
   /** A mode's Quick Play was clicked: find (or start) a Quick Play room of it. */
   onQuickPlay(mode: GameModeId): void;
+  /** The duel's Ranked was clicked: search for a rated match. */
+  onRanked(): void;
 }
 
 /**
@@ -37,7 +39,7 @@ export interface LobbyHandlers {
  * keys, room settings) and a button per mode. Choices are remembered in this
  * browser.
  */
-export function setupLobbyForm({ onElementChange, onPlay, onQuickPlay }: LobbyHandlers): LobbyChoices {
+export function setupLobbyForm({ onElementChange, onPlay, onQuickPlay, onRanked }: LobbyHandlers): LobbyChoices {
   const nicknameInput = $("nickname") as HTMLInputElement;
   nicknameInput.maxLength = NICKNAME_MAX;
   nicknameInput.value = loadNickname();
@@ -102,7 +104,7 @@ export function setupLobbyForm({ onElementChange, onPlay, onQuickPlay }: LobbyHa
     roundsToWin: rounds.valueAsNumber,
   }) as GameModeConfig;
 
-  const showModes = renderModeButtons($("mode-buttons"), onPlay, onQuickPlay);
+  const showModes = renderModeButtons($("mode-buttons"), onPlay, onQuickPlay, onRanked);
   function settingsChanged() {
     const ffa = gameMode("ffa");
     const br = gameMode("battleRoyale");

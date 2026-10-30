@@ -137,6 +137,17 @@ export const SERVER_MESSAGE = {
      * projectile and effect being drawn. No payload.
      */
     arenaReset: "arena_reset",
+    /** Ranked match room, to whoever is still there when the match is called off before it started — payload `RankedCancelled`. */
+    rankedCancelled: "ranked_cancelled",
+    /** Ranked match room, to each player once the match is decided — payload `RankedResult`. */
+    rankedResult: "ranked_result",
+};
+/** Server → client, sent by the ranked queue room (`ranked_queue`). Leaving the room stops searching. */
+export const RANKED_QUEUE_MESSAGE = {
+    /** To each player searching, every queue tick — payload `RankedQueueStatus`. */
+    status: "ranked_status",
+    /** To a player once paired: go and join the match — payload `RankedMatchFound`. */
+    matchFound: "ranked_match_found",
 };
 /** Server → client, sent by Colyseus' built-in LobbyRoom (names fixed by Colyseus). */
 export const LOBBY_MESSAGE = {

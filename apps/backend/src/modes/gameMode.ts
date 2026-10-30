@@ -43,6 +43,10 @@ export interface GameMode {
   ready(sessionId: string): void;
   /** Once per room step, after the simulation: phases, round results. */
   step(): void;
+  /** A player's connection dropped; their seat is held for `graceMs` while they try to come back. */
+  drop?(sessionId: string, graceMs: number): void;
+  /** A dropped player is back in their seat. */
+  reconnect?(sessionId: string): void;
 }
 
 /** Puts a player at rest on the ground at (x, y), facing the arena centre. */

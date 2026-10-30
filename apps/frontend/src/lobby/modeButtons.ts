@@ -16,10 +16,11 @@ function summary(config: GameModeConfig): string {
 /**
  * One button per game mode; clicking one starts a new room of that mode.
  * Under each, Quick Play: into an open Quick Play room of that mode, or a new
- * one. Returns a function that refreshes each button's summary line from the
- * settings the rooms would get.
+ * one — and under the duel, Ranked: search for a rated match. Returns a
+ * function that refreshes each button's summary line from the settings the
+ * rooms would get.
  */
-export function renderModeButtons(container: HTMLElement, onPlay: (mode: GameModeId) => void, onQuickPlay: (mode: GameModeId) => void) {
+export function renderModeButtons(container: HTMLElement, onPlay: (mode: GameModeId) => void, onQuickPlay: (mode: GameModeId) => void, onRanked: () => void) {
   const summaries = new Map<GameModeId, HTMLElement>();
 
   container.replaceChildren(...GAME_MODES.map((mode) => {
@@ -53,6 +54,15 @@ export function renderModeButtons(container: HTMLElement, onPlay: (mode: GameMod
     quick.addEventListener("click", () => onQuickPlay(mode));
 
     card.append(button, quick);
+    if (mode === "duel") {
+      const ranked = document.createElement("button");
+      ranked.type = "button";
+      ranked.className = "quick-play-button ranked-button";
+      ranked.textContent = "Ranked";
+      ranked.setAttribute("aria-label", "Ranked duel: search for a rated match");
+      ranked.addEventListener("click", onRanked);
+      card.append(ranked);
+    }
     return card;
   }));
 

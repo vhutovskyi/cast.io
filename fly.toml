@@ -6,12 +6,26 @@
 app = 'cast-io'
 primary_region = 'arn'
 
+# A deploy waits for ranked matches under way to finish (RANKED.shutdownDrainMs, 240 s) before
+# the server exits: give it Fly's maximum before it is killed. Top-level, like every app-wide
+# setting: below a [table] header it would belong to that table, and Fly would ignore it.
+kill_timeout = 300
+
 [build]
   dockerfile = 'Dockerfile'
 
 [env]
   NODE_ENV = 'production'
   PORT = '2567'
+  # Accounts and ratings: on the volume below, so deploys don't wipe them.
+  DB_FILE = '/data/ligma.db'
+  PUBLIC_URL = 'https://cast-io.fly.dev'
+
+# Created once with: fly volumes create ligma_data --region arn --size 1
+# A volume belongs to one machine, and the server keeps ranked state in one process: run exactly one machine.
+[mounts]
+  source = 'ligma_data'
+  destination = '/data'
 
 [http_service]
   internal_port = 2567

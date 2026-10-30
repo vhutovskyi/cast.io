@@ -84,6 +84,12 @@ export const Match = schema({
     matchWinnerId: t.string(),
     /** A Quick Play room: matches start on their own once enough are seated, no Ready. Never changes. */
     autoStart: t.boolean(),
+    /** A ranked duel: one match, rated, made by the ranked queue. Never changes. */
+    ranked: t.boolean(),
+    /** Ranked: a player who dropped mid-match, waited for with the fight paused; "" if nobody. */
+    awaitingId: t.string(),
+    /** Ranked: whole seconds left for `awaitingId` to come back before they forfeit. */
+    awaitingSeconds: t.uint8(),
 });
 /**
  * A wall raised in the arena (an `Obstacle`, see `shared/obstacles.ts`):

@@ -1,3 +1,5 @@
+// First: secrets from the gitignored `.env.local`, before anything reads `process.env`.
+import "./localEnv.js";
 import {
   defineServer,
   defineRoom,
@@ -22,6 +24,8 @@ const FRONTEND_DIST = process.env.FRONTEND_DIST
  * Import your Room files
  */
 import { MyRoom } from "./rooms/MyRoom.js";
+import { RankedQueueRoom } from "./rooms/RankedQueueRoom.js";
+import { signInEndpoints } from "./accounts/oauth.js";
 
 const server = defineServer({
 
@@ -33,6 +37,8 @@ const server = defineServer({
     // Matched against the room's metadata, so a room made from the browser (`quickPlay: false`) is never picked.
     my_room: defineRoom(MyRoom).enableRealtimeListing().filterBy(["mode", "quickPlay"]).sortBy({ clients: -1 }),
     lobby: defineRoom(LobbyRoom),
+    // One queue for everyone: being in it is searching. It makes ranked `my_room`s itself.
+    ranked_queue: defineRoom(RankedQueueRoom),
   },
 
   /**
@@ -46,6 +52,8 @@ const server = defineServer({
     api_hello: createEndpoint("/api/hello", { method: "GET" }, async (ctx) => {
       return { message: "Hello World" };
     }),
+    // Sign-in with Discord / Google, for ranked play: `/auth/...`.
+    ...signInEndpoints,
   }),
 
   /**

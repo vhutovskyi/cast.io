@@ -1,7 +1,8 @@
 import assert from "assert";
-import { ColyseusTestServer, boot } from "@colyseus/testing";
+import type { ColyseusTestServer } from "@colyseus/testing";
 
-import appConfig from "../src/app.config.js";
+import type appConfig from "../src/app.config.js";
+import { testServer } from "./testServer.js";
 import { MyRoomState, type MoveInput } from "../src/rooms/schema/MyRoomState.js";
 import { PLAYER_SPEED, TICK_RATE, GRAVITY, JUMP_SPEED, ROOM_NAME_MAX, NICKNAME_MAX, MAX_HP, PLAYER_HALF, ARENA_WIDTH, ARENA_HEIGHT, RESPAWN_DELAY_MS, EYE_HEIGHT } from "../src/shared/constants.js";
 import { SUN_STRIKE, type SunStrikeCharging, type SunStrikeHit } from "../src/skills/sunStrike/sunStrikeConfig.js";
@@ -31,8 +32,7 @@ import { ActionPrediction } from "../../frontend/src/net/actionPrediction.js";
 describe("testing your Colyseus app", () => {
   let colyseus: ColyseusTestServer<typeof appConfig>;
 
-  before(async () => colyseus = await boot(appConfig));
-  after(async () => colyseus.shutdown());
+  before(async () => colyseus = await testServer());
 
   beforeEach(async () => {
     await colyseus.cleanup();

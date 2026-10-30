@@ -1,4 +1,4 @@
-import { Callbacks } from "@colyseus/sdk";
+import { Callbacks, CloseCode } from "@colyseus/sdk";
 import { Predict } from "@colyseus/sdk/predict";
 import type { MoveInput } from "@ligma/backend/rooms/schema/MyRoomState";
 import { stepEntity, deadInput } from "@ligma/backend/shared/movement";
@@ -7,6 +7,7 @@ import { MAX_HP, RESPAWN_DELAY_MS } from "@ligma/backend/shared/constants";
 import type { MagicElement } from "@ligma/backend/shared/elements";
 import { SKILL_SLOTS, hasSkill, kitOf, slotOf, type SkillId, type SkillSlot } from "@ligma/backend/shared/skills";
 import type { KillEvent } from "@ligma/backend/shared/combat";
+import { RANKED_CLOSE_CODE, type RankedCancelled, type RankedResult } from "@ligma/backend/shared/ranked";
 import { CLIENT_MESSAGE, SERVER_MESSAGE } from "@ligma/backend/shared/messages";
 import { blockedByWalls, canCast, moveLimits } from "@ligma/backend/effects/effectConfig";
 import type { ArenaRoom } from "../net/arenaRoom";
@@ -48,8 +49,18 @@ import { SkyfallController } from "../skills/skyfall/skyfall";
 import type { ArenaFrame, ArenaSkillController } from "../skills/arenaFrame";
 import type { SlotSkill } from "../skills/slotSkill";
 
-/** Why a session ended: the WebSocket close code and the server's reason, if any. */
-export interface ArenaLeave { code: number; reason?: string; }
+/**
+ * Why a session ended: the WebSocket close code and the server's reason, if
+ * any — and, for a ranked match called off, why (so it doesn't count).
+ */
+export interface ArenaLeave { code: number; reason?: string; rankedCancelled?: RankedCancelled["reason"]; }
+
+/** Why a ranked room closed with `code`, if it was called off: the close code arrives even when the message didn't. */
+function rankedCancelledBy(code: number): RankedCancelled["reason"] | undefined {
+  if (code === RANKED_CLOSE_CODE.calledOff) { return "opponentDodged"; }
+  if (code === CloseCode.SERVER_SHUTDOWN) { return "serverRestart"; }
+  return undefined;
+}
 
 /**
  * Plays one arena session: prediction, input, rendering. Resolves once the
@@ -301,6 +312,11 @@ export async function playArena(room: ArenaRoom, scene: ArenaScene, look: MouseL
   const killFeed = new KillFeed(hud.killFeed, room.sessionId);
   room.onMessage(SERVER_MESSAGE.kill, (kill: KillEvent) => killFeed.add(kill));
 
+  // Ranked: what the match did to our rating, and whether it was called off (the room closes right after).
+  room.onMessage(SERVER_MESSAGE.rankedResult, (result: RankedResult) => matchHud.showRankedResult(result));
+  let rankedCancelled: RankedCancelled["reason"] | undefined;
+  room.onMessage(SERVER_MESSAGE.rankedCancelled, (message: RankedCancelled) => rankedCancelled = message.reason);
+
   callbacks.onAdd("players", (player, sessionId) => {
     if (sessionId === room.sessionId) { return; }
     const avatar = scene.createPlayer(player.name, player.element as MagicElement);
@@ -465,7 +481,11 @@ export async function playArena(room: ArenaRoom, scene: ArenaScene, look: MouseL
 
   frameId = requestAnimationFrame(frame);
 
-  const left = await new Promise<ArenaLeave>((resolve) => room.onLeave((code, reason) => resolve({ code, reason })));
+  const left = await new Promise<ArenaLeave>((resolve) => room.onLeave((code, reason) => resolve({
+    code, reason,
+    // A result already in means it counted, whatever closed the room after.
+    rankedCancelled: room.state.match.ranked && !matchHud.hasRankedResult ? rankedCancelled ?? rankedCancelledBy(code) : undefined,
+  })));
 
   cancelAnimationFrame(frameId);
   if (onDebugKey) { removeEventListener("keydown", onDebugKey); }

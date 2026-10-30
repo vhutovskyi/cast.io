@@ -6,6 +6,18 @@ import { isWaterClone } from "../skills/waterClone/waterCloneConfig.js";
 
 type Side = 0 | 1;
 
+export interface DuelOptions {
+  /** Quick Play and ranked: no Ready — a match starts as soon as both seats are taken. */
+  autoStart?: boolean;
+  /**
+   * A ranked duel: one match, whose winner goes to `onMatchEnd`. Leaving
+   * doesn't end it here: the ranked match judges what a leave means and calls
+   * `forfeit`. While a seated player is disconnected, the fight is paused: no
+   * hits count until they're back, or gone.
+   */
+  ranked?: { onMatchEnd(winnerId: string): void };
+}
+
 /**
  * One against one, first to `roundsToWin` rounds. Both players press Ready to
  * start a match — or, with `autoStart` (Quick Play), it starts as soon as both
@@ -19,12 +31,21 @@ export class DuelMode implements GameMode {
   private sides = new Map<string, Side>();
   /** Room-clock time (ms) the current timed phase ends. */
   private phaseEndsAt = 0;
+  private readonly autoStart: boolean;
+  private readonly ranked: DuelOptions["ranked"];
+  /** Ranked: the one match has been decided; no other starts. */
+  private over = false;
+  /** Ranked: dropped players being waited for, by session id, with the room-clock time (ms) their seat is held until. */
+  private awaiting = new Map<string, number>();
 
-  constructor(private readonly room: ModeRoom, settings: DuelSettings, private readonly autoStart = false) {
+  constructor(private readonly room: ModeRoom, settings: DuelSettings, { autoStart = false, ranked }: DuelOptions = {}) {
+    this.autoStart = autoStart;
+    this.ranked = ranked;
     const { match } = room.state;
     match.mode = "duel";
     match.roundsToWin = settings.roundsToWin;
     match.autoStart = autoStart;
+    match.ranked = ranked !== undefined;
     this.setPhase("waiting");
   }
 
@@ -33,7 +54,7 @@ export class DuelMode implements GameMode {
   }
 
   get canDamage() {
-    return this.phase === "fighting";
+    return this.phase === "fighting" && this.awaiting.size === 0;
   }
 
   join(sessionId: string, player: Player) {
@@ -45,7 +66,10 @@ export class DuelMode implements GameMode {
 
   leave(sessionId: string) {
     this.sides.delete(sessionId);
-    if (this.phase === "waiting") { return; }
+    this.awaiting.delete(sessionId);
+    this.showAwaiting();
+    // Ranked: the ranked match decides whether this forfeits, and to whom (`forfeit`).
+    if (this.phase === "waiting" || this.ranked) { return; }
     const [remaining] = this.seated().map(([id]) => id);
     this.endMatch(remaining ?? "");
   }
@@ -55,6 +79,24 @@ export class DuelMode implements GameMode {
 
   /** Nobody respawns in a duel: the next round brings everyone back. */
   respawn() {}
+
+  /** Ranked: pause the fight until they're back. Elsewhere a dropped player just stands there. */
+  drop(sessionId: string, graceMs: number) {
+    if (!this.ranked || this.over) { return; }
+    this.awaiting.set(sessionId, this.room.clock.currentTime + graceMs);
+    this.showAwaiting();
+  }
+
+  reconnect(sessionId: string) {
+    this.awaiting.delete(sessionId);
+    this.showAwaiting();
+  }
+
+  /** Ranked: `winnerId` wins the match now, the other having left — even before the first round has begun. */
+  forfeit(winnerId: string) {
+    if (!this.ranked || this.over) { return; }
+    this.endMatch(winnerId);
+  }
 
   /** Toggles; once every seat is filled and ready, the match starts. Unused with `autoStart`. */
   ready(sessionId: string) {
@@ -69,11 +111,13 @@ export class DuelMode implements GameMode {
   step() {
     const now = this.room.clock.currentTime;
     const { match } = this.room.state;
+    if (this.awaiting.size > 0) { this.showAwaiting(); }
 
     switch (this.phase) {
       case "waiting":
         // Quick Play: no Ready — once the last result has been up long enough, fight whoever is here.
-        if (!this.autoStart || now < this.phaseEndsAt) { break; }
+        // Ranked: only ever the one match.
+        if (!this.autoStart || this.over || now < this.phaseEndsAt) { break; }
         if (this.seated().length === DUEL.maxClients) {
           this.startMatch();
         } else {
@@ -131,6 +175,20 @@ export class DuelMode implements GameMode {
     for (const player of this.room.state.players.values()) { player.ready = false; }
     this.resetArena();
     this.setPhase("waiting", this.autoStart ? QUICK_PLAY.matchOverMs : 0);
+    if (this.ranked) {
+      this.over = true;
+      this.awaiting.clear();
+      this.showAwaiting();
+      this.ranked.onMatchEnd(winnerId);
+    }
+  }
+
+  /** The HUD's "waiting for X to reconnect (12s)": the first of those being waited for. */
+  private showAwaiting() {
+    const { match } = this.room.state;
+    const [sessionId, heldUntil] = this.awaiting.entries().next().value ?? ["", 0];
+    match.awaitingId = sessionId;
+    match.awaitingSeconds = sessionId ? Math.ceil(Math.max(0, heldUntil - this.room.clock.currentTime) / 1000) : 0;
   }
 
   private resetArena() {
